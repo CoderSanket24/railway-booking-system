@@ -27,20 +27,21 @@ public class AuthController {
     public String register(@RequestBody Map<String, String> payload) {
         String username = payload.get("username");
         String password = payload.get("password");
+        String role = payload.getOrDefault("role", "USER"); // Default to USER
 
         if (userRepository.findByUsername(username).isPresent()) {
             return "FAILED: User already exists!";
         }
 
         // Hash the password BEFORE saving it to the MySQL database
-        User newUser = new User(username, passwordEncoder.encode(password));
+        User newUser = new User(username, passwordEncoder.encode(password), role);
         userRepository.save(newUser);
 
         return "SUCCESS: User " + username + " registered successfully!";
     }
 
     @PostMapping("/login")
-    public String login(@RequestBody Map<String, String> payload) {
+    public Map<String, String> login(@RequestBody Map<String, String> payload) {
         String username = payload.get("username");
         String password = payload.get("password");
 
@@ -48,13 +49,19 @@ public class AuthController {
 
         // Check if user exists AND if the raw password matches the hashed password in the DB
         if (userOpt.isPresent() && passwordEncoder.matches(password, userOpt.get().getPassword())) {
-
+            User user = userOpt.get();
+            
             // Success! Generate the digital ID card (JWT)
             String token = jwtUtil.generateToken(username);
-            System.out.println("[AUTH] User " + username + " logged in. JWT Generated.");
-            return token;
+            System.out.println("[AUTH] User " + username + " (" + user.getRole() + ") logged in. JWT Generated.");
+            
+            return Map.of(
+                "token", token,
+                "role", user.getRole(),
+                "username", username
+            );
         }
 
-        return "FAILED: Invalid username or password.";
+        return Map.of("error", "FAILED: Invalid username or password.");
     }
 }

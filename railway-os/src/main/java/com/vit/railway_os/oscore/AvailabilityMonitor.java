@@ -61,4 +61,8 @@ public class AvailabilityMonitor {
             Thread.currentThread().interrupt();
         }
     }
+
+    public int getActiveReaders() {
+        return readersCount;
+    }
 }

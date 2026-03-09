@@ -39,7 +39,7 @@ public class CriticalSectionGuard {
             if (train.getAvailableSeats() >= seatsNeeded) {
 
                 // Simulate processing/network time to prove the lock holds off concurrent requests
-                Thread.sleep(500);
+                Thread.sleep(3000);
 
                 // 3. MODIFY: Deduct the seats
                 train.setAvailableSeats(train.getAvailableSeats() - seatsNeeded);

@@ -9,9 +9,9 @@ public class WebConfig implements WebMvcConfigurer {
 
     @Override
     public void addCorsMappings(CorsRegistry registry) {
-        // This tells Spring Boot: "Allow my React app on port 5173 to talk to you!"
+        // Allow access from localhost and local network (mobile devices)
         registry.addMapping("/**")
-                .allowedOrigins("http://localhost:5173") // Vite/React default port
+                .allowedOriginPatterns("*") // Allow all origins including mobile
                 .allowedMethods("GET", "POST", "PUT", "DELETE", "OPTIONS")
                 .allowedHeaders("*")
                 .allowCredentials(true);

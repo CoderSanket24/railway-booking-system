@@ -1,35 +1,69 @@
-import { useState } from 'react'
-import reactLogo from './assets/react.svg'
-import viteLogo from '/vite.svg'
-import './App.css'
+import React from 'react';
+import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 
-function App() {
-  const [count, setCount] = useState(0)
+import UserLogin from './components/UserLogin.tsx';
+import AdminLogin from './components/AdminLogin.tsx';
+import Register from './components/Register.tsx';
+import Dashboard from './components/Dashboard.tsx';
+import AdminDashboard from './components/AdminDashboard.tsx';
 
-  return (
-    <>
-      <div>
-        <a href="https://vite.dev" target="_blank">
-          <img src={viteLogo} className="logo" alt="Vite logo" />
-        </a>
-        <a href="https://react.dev" target="_blank">
-          <img src={reactLogo} className="logo react" alt="React logo" />
-        </a>
-      </div>
-      <h1>Vite + React</h1>
-      <div className="card">
-        <button onClick={() => setCount((count) => count + 1)}>
-          count is {count}
-        </button>
-        <p>
-          Edit <code>src/App.tsx</code> and save to test HMR
-        </p>
-      </div>
-      <p className="read-the-docs">
-        Click on the Vite and React logos to learn more
-      </p>
-    </>
-  )
+interface PrivateRouteProps {
+  children: React.ReactNode;
+  requiredRole?: string;
 }
 
-export default App
+function App() {
+  // Role-based route protection
+  const PrivateRoute: React.FC<PrivateRouteProps> = ({ children, requiredRole }) => {
+    const token = localStorage.getItem('jwt_token');
+    const userRole = localStorage.getItem('user_role');
+    
+    if (!token) {
+      return <Navigate to="/login" />;
+    }
+    
+    if (requiredRole && userRole !== requiredRole) {
+      // If user tries to access admin, redirect to user dashboard
+      // If admin tries to access user, redirect to admin dashboard
+      return <Navigate to={userRole === 'ADMIN' ? '/admin' : '/dashboard'} />;
+    }
+    
+    return <>{children}</>;
+  };
+
+  return (
+    <Router>
+      <div style={{ fontFamily: 'Arial, sans-serif', backgroundColor: '#f4f4f9', minHeight: '100vh' }}>
+        <Routes>
+          {/* Public Routes */}
+          <Route path="/" element={<Navigate to="/login" />} />
+          <Route path="/login" element={<UserLogin />} />
+          <Route path="/admin-login" element={<AdminLogin />} />
+          <Route path="/register" element={<Register />} />
+
+          {/* Protected User Route */}
+          <Route 
+            path="/dashboard" 
+            element={
+              <PrivateRoute requiredRole="USER">
+                <Dashboard />
+              </PrivateRoute>
+            } 
+          />
+
+          {/* Protected Admin Route */}
+          <Route 
+            path="/admin" 
+            element={
+              <PrivateRoute requiredRole="ADMIN">
+                <AdminDashboard />
+              </PrivateRoute>
+            } 
+          />
+        </Routes>
+      </div>
+    </Router>
+  );
+}
+
+export default App;

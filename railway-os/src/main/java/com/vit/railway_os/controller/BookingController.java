@@ -30,15 +30,19 @@ public class BookingController {
     private AvailabilityMonitor availabilityMonitor;
 
     /**
-     * MEMBER 1, 2, 3: Book ticket with different scheduling algorithms
-     * schedulerType: "FCFS", "SJF", "RR", "PRIORITY"
+     * MEMBER 1, 2, 3: Book ticket - uses admin-configured scheduler
      */
     @PostMapping("/book")
     public String bookTicket(@RequestBody Map<String, Object> payload) {
         int userId = Integer.parseInt(payload.get("userId").toString());
         int seatsNeeded = Integer.parseInt(payload.get("seatsNeeded").toString());
         boolean isTatkal = (boolean) payload.getOrDefault("isTatkal", false);
-        String schedulerType = payload.getOrDefault("schedulerType", "FCFS").toString();
+        
+        // Get system-wide scheduler configured by admin
+        String schedulerType = AdminController.getSystemScheduler();
+
+        System.out.println("[BOOKING] User " + userId + " booking " + seatsNeeded + 
+                          " seats using " + schedulerType + " scheduler");
 
         // MEMBER 1: Create process with PCB
         BookingProcess process = new BookingProcess(userId, seatsNeeded, isTatkal, guard);
@@ -48,25 +52,27 @@ public class BookingController {
             case "FCFS":
                 fcfsScheduler.addProcess(process);
                 new Thread(() -> fcfsScheduler.dispatch()).start();
-                return "Process " + userId + " submitted to FCFS Scheduler";
+                return "Booking confirmed! (Processed via FCFS Scheduler)";
                 
             case "SJF":
                 sjfScheduler.addProcess(process);
                 new Thread(() -> sjfScheduler.dispatch()).start();
-                return "Process " + userId + " submitted to SJF Scheduler (Shortest Job First)";
+                return "Booking confirmed! (Processed via SJF Scheduler)";
                 
             case "RR":
                 roundRobinScheduler.addProcess(process);
                 new Thread(() -> roundRobinScheduler.dispatch()).start();
-                return "Process " + userId + " submitted to Round Robin Scheduler";
+                return "Booking confirmed! (Processed via Round Robin Scheduler)";
                 
             case "PRIORITY":
                 priorityScheduler.addProcess(process);
                 new Thread(() -> priorityScheduler.dispatch()).start();
-                return "Process " + userId + " submitted to Priority Scheduler (Tatkal: " + isTatkal + ")";
+                return "Booking confirmed! (Processed via Priority Scheduler)";
                 
             default:
-                return "Invalid scheduler type. Use: FCFS, SJF, RR, or PRIORITY";
+                fcfsScheduler.addProcess(process);
+                new Thread(() -> fcfsScheduler.dispatch()).start();
+                return "Booking confirmed! (Processed via FCFS Scheduler)";
         }
     }
 

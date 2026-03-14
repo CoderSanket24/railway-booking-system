@@ -1,6 +1,6 @@
 // API Configuration
 // Change this IP to your computer's IP address
-const API_BASE_URL = 'http://172.168.0.207:8080';
+const API_BASE_URL = 'https://railway-booking-system-otpp.onrender.com';
 
 export const API_ENDPOINTS = {
     LOGIN: `${API_BASE_URL}/api/auth/login`,

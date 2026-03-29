@@ -19,7 +19,7 @@ const UserLogin: React.FC = () => {
             const response = await axios.post(API_ENDPOINTS.LOGIN, { username, password });
             if (response.data.error) {
                 setError(response.data.error);
-            } else if (response.data.role !== 'USER') {
+            } else if (response.data.role === 'ADMIN') {
                 setError('Access denied. Please use admin login.');
             } else {
                 localStorage.setItem('jwt_token', response.data.token);

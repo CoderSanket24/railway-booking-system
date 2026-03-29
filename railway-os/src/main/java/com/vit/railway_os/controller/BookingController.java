@@ -1,10 +1,14 @@
 package com.vit.railway_os.controller;
 
+import com.vit.railway_os.model.Booking;
+import com.vit.railway_os.model.Train;
 import com.vit.railway_os.oscore.*;
+import com.vit.railway_os.repository.BookingRepository;
+import com.vit.railway_os.repository.TrainRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
 
-import java.util.Map;
+import java.util.*;
 
 @RestController
 @RequestMapping("/api")
@@ -12,130 +16,212 @@ public class BookingController {
 
     @Autowired
     private CriticalSectionGuard guard;
-    
-    // MEMBER 2: Scheduling Algorithms
+
+    @Autowired
+    private OsStateTracker tracker;
+
     @Autowired
     private FCFSScheduler fcfsScheduler;
+
     @Autowired
     private SJFScheduler sjfScheduler;
+
     @Autowired
     private RoundRobinScheduler roundRobinScheduler;
-    
-    // MEMBER 5: Priority Scheduler
+
     @Autowired
     private PriorityScheduler priorityScheduler;
-    
-    // MEMBER 4: Readers-Writers
+
     @Autowired
     private AvailabilityMonitor availabilityMonitor;
 
-    /**
-     * MEMBER 1, 2, 3: Book ticket - uses admin-configured scheduler
-     */
-    @PostMapping("/book")
-    public String bookTicket(@RequestBody Map<String, Object> payload) {
-        int userId = Integer.parseInt(payload.get("userId").toString());
-        int seatsNeeded = Integer.parseInt(payload.get("seatsNeeded").toString());
-        boolean isTatkal = (boolean) payload.getOrDefault("isTatkal", false);
-        
-        // Get system-wide scheduler configured by admin
-        String schedulerType = AdminController.getSystemScheduler();
+    @Autowired
+    private TrainRepository trainRepository;
 
-        System.out.println("[BOOKING] User " + userId + " booking " + seatsNeeded + 
-                          " seats using " + schedulerType + " scheduler");
+    @Autowired
+    private BookingRepository bookingRepository;
+
+    // ─────────────────────────────────────────────────────────────
+    // GET /api/trains — Return live seat counts for all trains
+    // Wrapped in Readers-Writers protocol so Admin Dashboard shows active readers
+    // ─────────────────────────────────────────────────────────────
+    @GetMapping("/trains")
+    public List<Map<String, Object>> getAllTrains(@RequestParam(required = false) Integer userId) {
+        int readerId = userId != null ? userId : (int)(Math.random() * 9000 + 1000);
+
+        // OS CONCEPT: Enter reader critical section
+        availabilityMonitor.startRead(readerId);
+        List<Train> trains;
+        try {
+            trains = trainRepository.findAll(); // Read shared data
+        } finally {
+            availabilityMonitor.endRead(readerId); // Exit reader critical section
+        }
+
+        List<Map<String, Object>> result = new ArrayList<>();
+        for (Train t : trains) {
+            Map<String, Object> m = new HashMap<>();
+            m.put("trainNumber", t.getTrainNumber());
+            m.put("trainName", t.getTrainName());
+            m.put("from", t.getFromStation());
+            m.put("to", t.getToStation());
+            m.put("departure", t.getDeparture());
+            m.put("arrival", t.getArrival());
+            m.put("duration", t.getDuration());
+            m.put("type", t.getType());
+            m.put("price", t.getPrice());
+            m.put("totalSeats", t.getTotalSeats());
+            m.put("availableSeats", t.getAvailableSeats());
+            result.add(m);
+        }
+        return result;
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // POST /api/book — Book a ticket via the OS scheduling pipeline
+    // ─────────────────────────────────────────────────────────────
+    @PostMapping("/book")
+    public Map<String, Object> bookTicket(@RequestBody Map<String, Object> payload) {
+        int userId         = Integer.parseInt(payload.get("userId").toString());
+        int seatsNeeded    = Integer.parseInt(payload.get("seatsNeeded").toString());
+        boolean isTatkal   = Boolean.parseBoolean(payload.getOrDefault("isTatkal", false).toString());
+        String trainNumber = payload.getOrDefault("trainNumber", "EXP-12951").toString();
+        String passengerName = payload.getOrDefault("passengerName", "Passenger").toString();
+
+        String schedulerType = AdminController.getSystemScheduler();
+        System.out.println("[BOOKING] User " + userId + " booking " + seatsNeeded +
+                           " seats on " + trainNumber + " via " + schedulerType);
 
         // MEMBER 1: Create process with PCB
-        BookingProcess process = new BookingProcess(userId, seatsNeeded, isTatkal, guard);
+        BookingProcess process = new BookingProcess(userId, seatsNeeded, isTatkal,
+                trainNumber, passengerName, guard, tracker);
 
-        // MEMBER 2 & 5: Route to appropriate scheduler
-        switch (schedulerType.toUpperCase()) {
-            case "FCFS":
-                fcfsScheduler.addProcess(process);
-                new Thread(() -> fcfsScheduler.dispatch()).start();
-                return "Booking confirmed! (Processed via FCFS Scheduler)";
-                
-            case "SJF":
-                sjfScheduler.addProcess(process);
-                new Thread(() -> sjfScheduler.dispatch()).start();
-                return "Booking confirmed! (Processed via SJF Scheduler)";
-                
-            case "RR":
-                roundRobinScheduler.addProcess(process);
-                new Thread(() -> roundRobinScheduler.dispatch()).start();
-                return "Booking confirmed! (Processed via Round Robin Scheduler)";
-                
-            case "PRIORITY":
-                priorityScheduler.addProcess(process);
-                new Thread(() -> priorityScheduler.dispatch()).start();
-                return "Booking confirmed! (Processed via Priority Scheduler)";
-                
-            default:
-                fcfsScheduler.addProcess(process);
-                new Thread(() -> fcfsScheduler.dispatch()).start();
-                return "Booking confirmed! (Processed via FCFS Scheduler)";
+        // Run synchronously so we can return the result
+        try {
+            switch (schedulerType.toUpperCase()) {
+                case "SJF":
+                    sjfScheduler.addProcess(process);
+                    break;
+                case "RR":
+                    roundRobinScheduler.addProcess(process);
+                    break;
+                case "PRIORITY":
+                    priorityScheduler.addProcess(process);
+                    break;
+                default:
+                    fcfsScheduler.addProcess(process);
+                    break;
+            }
+
+            // Run the process directly and wait
+            process.start();
+            process.join();
+
+            CriticalSectionGuard.BookingResult result = process.getResult();
+            Map<String, Object> response = new HashMap<>();
+            if (result != null && result.success && result.booking != null) {
+                response.put("success", true);
+                response.put("pnr", result.booking.getPnr());
+                response.put("message", "Booking confirmed! (Scheduler: " + schedulerType + ")");
+                response.put("trainName", result.booking.getTrainName());
+                response.put("from", result.booking.getFromStation());
+                response.put("to", result.booking.getToStation());
+                response.put("departure", result.booking.getDeparture());
+                response.put("seats", result.booking.getSeats());
+                response.put("totalPrice", result.booking.getTotalPrice());
+                response.put("bookingDate", result.booking.getBookingDate());
+                response.put("status", result.booking.getStatus());
+                response.put("passengerName", result.booking.getPassengerName());
+            } else {
+                response.put("success", false);
+                response.put("message", result != null ? result.message : "Booking failed.");
+            }
+            return response;
+
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return Map.of("success", false, "message", "Booking interrupted.");
         }
     }
 
-    /**
-     * MEMBER 4: Check seat availability (Readers-Writers Problem)
-     */
+    // ─────────────────────────────────────────────────────────────
+    // GET /api/bookings/{userId} — Fetch booking history for a user
+    // ─────────────────────────────────────────────────────────────
+    @GetMapping("/bookings/{userId}")
+    public List<Map<String, Object>> getUserBookings(@PathVariable int userId) {
+        List<Booking> bookings = bookingRepository.findByUserIdOrderByIdDesc(userId);
+        List<Map<String, Object>> result = new ArrayList<>();
+        for (Booking b : bookings) {
+            Map<String, Object> m = new HashMap<>();
+            m.put("id", b.getId());
+            m.put("pnr", b.getPnr());
+            m.put("trainNumber", b.getTrainNumber());
+            m.put("trainName", b.getTrainName());
+            m.put("from", b.getFromStation());
+            m.put("to", b.getToStation());
+            m.put("departure", b.getDeparture());
+            m.put("seats", b.getSeats());
+            m.put("totalPrice", b.getTotalPrice());
+            m.put("bookingDate", b.getBookingDate());
+            m.put("status", b.getStatus());
+            m.put("passengerName", b.getPassengerName());
+            result.add(m);
+        }
+        return result;
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // GET /api/check — Readers-Writers: check seat availability
+    // ─────────────────────────────────────────────────────────────
     @GetMapping("/check")
     public String checkSeats(@RequestParam int userId) {
-        new Thread(() -> {
-            availabilityMonitor.checkAvailability(userId);
-        }).start();
+        new Thread(() -> availabilityMonitor.checkAvailability(userId)).start();
         return "User " + userId + " checking seat availability (Reader)";
     }
 
-    /**
-     * MEMBER 4: Simulate write operation (Readers-Writers Problem)
-     */
+    // ─────────────────────────────────────────────────────────────
+    // POST /api/simulate-write — Readers-Writers: simulate write
+    // ─────────────────────────────────────────────────────────────
     @PostMapping("/simulate-write")
     public String triggerWriteBlock(@RequestParam int userId) {
-        new Thread(() -> {
-            availabilityMonitor.simulateBookingWrite(userId);
-        }).start();
+        new Thread(() -> availabilityMonitor.simulateBookingWrite(userId)).start();
         return "User " + userId + " initiated write lock (Writer)";
     }
 
-    /**
-     * MEMBER 5: Producer-Consumer demonstration
-     */
+    // ─────────────────────────────────────────────────────────────
+    // POST /api/producer-consumer — Demo for Member 5
+    // ─────────────────────────────────────────────────────────────
     @PostMapping("/producer-consumer")
     public String demonstrateProducerConsumer(@RequestBody Map<String, Object> payload) {
-        String trainNumber = payload.getOrDefault("trainNumber", "EXP-12951").toString();
-        int ticketsToGenerate = Integer.parseInt(payload.getOrDefault("ticketsToGenerate", "20").toString());
-        int numConsumers = Integer.parseInt(payload.getOrDefault("numConsumers", "3").toString());
-        
-        TicketBuffer buffer = new TicketBuffer();
-        
-        // Start Producer
+        String trainNumber     = payload.getOrDefault("trainNumber", "EXP-12951").toString();
+        int ticketsToGenerate  = Integer.parseInt(payload.getOrDefault("ticketsToGenerate", "20").toString());
+        int numConsumers       = Integer.parseInt(payload.getOrDefault("numConsumers", "3").toString());
+
+        TicketBuffer buffer = new TicketBuffer(tracker);
         TicketProducer producer = new TicketProducer();
         producer.initialize(buffer, trainNumber, ticketsToGenerate);
         producer.start();
-        
-        // Start Multiple Consumers
+
         for (int i = 1; i <= numConsumers; i++) {
             TicketConsumer consumer = new TicketConsumer();
             consumer.initialize(buffer, i, ticketsToGenerate / numConsumers);
             consumer.start();
         }
-        
-        return "Producer-Consumer simulation started: " + ticketsToGenerate + 
-               " tickets, " + numConsumers + " consumers";
+
+        return "Producer-Consumer started: " + ticketsToGenerate + " tickets, " + numConsumers + " consumers";
     }
 
-    /**
-     * Get scheduler statistics
-     */
+    // ─────────────────────────────────────────────────────────────
+    // GET /api/stats — Scheduler queue sizes + reader count
+    // ─────────────────────────────────────────────────────────────
     @GetMapping("/stats")
     public Map<String, Integer> getStats() {
         return Map.of(
-            "fcfsQueueSize", fcfsScheduler.getQueueSize(),
-            "sjfQueueSize", sjfScheduler.getQueueSize(),
-            "rrQueueSize", roundRobinScheduler.getQueueSize(),
+            "fcfsQueueSize",     fcfsScheduler.getQueueSize(),
+            "sjfQueueSize",      sjfScheduler.getQueueSize(),
+            "rrQueueSize",       roundRobinScheduler.getQueueSize(),
             "priorityQueueSize", priorityScheduler.getQueueSize(),
-            "activeReaders", availabilityMonitor.getActiveReaders()
+            "activeReaders",     availabilityMonitor.getActiveReaders()
         );
     }
 }

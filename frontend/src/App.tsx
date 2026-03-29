@@ -33,7 +33,7 @@ function App() {
 
   return (
     <Router>
-      <div style={{ fontFamily: 'Arial, sans-serif', backgroundColor: '#f4f4f9', minHeight: '100vh' }}>
+      <div style={{ minHeight: '100vh' }}>
         <Routes>
           {/* Public Routes */}
           <Route path="/" element={<Navigate to="/login" />} />

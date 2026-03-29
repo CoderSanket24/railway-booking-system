@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import { API_ENDPOINTS } from '../config/api';
@@ -15,7 +15,7 @@ interface Booking {
     pnr: string; status: string; passengerName: string;
 }
 
-const TRAINS: Train[] = [
+const FALLBACK_TRAINS: Train[] = [
     { trainNumber: 'EXP-12951', trainName: 'Mumbai Rajdhani', from: 'Mumbai', to: 'Delhi',
       departure: '16:00', arrival: '08:00+1', duration: '16h', availableSeats: 100, price: 1500, type: 'Rajdhani' },
     { trainNumber: 'EXP-12952', trainName: 'Shatabdi Express', from: 'Mumbai', to: 'Pune',
@@ -36,30 +36,75 @@ const getSeatsColor = (seats: number) => {
     return '#EF4444';
 };
 
-const genPNR = () => 'PNR' + Math.floor(1000000000 + Math.random() * 9000000000);
+// Store userId in sessionStorage for consistency within a session
+const getSessionUserId = () => {
+    let uid = sessionStorage.getItem('session_user_id');
+    if (!uid) { uid = String(Math.floor(Math.random() * 9000) + 1000); sessionStorage.setItem('session_user_id', uid); }
+    return parseInt(uid);
+};
 
 const Dashboard: React.FC = () => {
     const navigate = useNavigate();
     const username = localStorage.getItem('username') || 'Passenger';
-    const [searchFrom, setSearchFrom] = useState('');
-    const [searchTo, setSearchTo] = useState('');
-    const [searchDate, setSearchDate] = useState('');
+    const userId   = getSessionUserId();
+
+    const [trains, setTrains]               = useState<Train[]>(FALLBACK_TRAINS);
+    const [searchFrom, setSearchFrom]       = useState('');
+    const [searchTo, setSearchTo]           = useState('');
+    const [searchDate, setSearchDate]       = useState('');
     const [selectedTrain, setSelectedTrain] = useState<Train | null>(null);
-    const [seatsToBook, setSeatsToBook] = useState(1);
+    const [seatsToBook, setSeatsToBook]     = useState(1);
     const [passengerName, setPassengerName] = useState('');
-    const [passengerAge, setPassengerAge] = useState('');
+    const [passengerAge, setPassengerAge]   = useState('');
     const [bookingHistory, setBookingHistory] = useState<Booking[]>([]);
-    const [showModal, setShowModal] = useState(false);
+    const [showModal, setShowModal]         = useState(false);
     const [bookingSuccess, setBookingSuccess] = useState(false);
-    const [isLoading, setIsLoading] = useState(false);
-    const [activeTab, setActiveTab] = useState<'search' | 'bookings'>('search');
+    const [isLoading, setIsLoading]         = useState(false);
+    const [activeTab, setActiveTab]         = useState<'search' | 'bookings'>('search');
+    const [activeScheduler, setActiveScheduler] = useState('FCFS');
+    const [trainsLoaded, setTrainsLoaded]   = useState(false);
 
-    const handleLogout = () => {
-        localStorage.clear();
-        navigate('/login');
-    };
+    const token = localStorage.getItem('jwt_token');
+    const authHeader = { Authorization: `Bearer ${token}` };
 
-    const filteredTrains = TRAINS.filter(t => {
+    // Fetch live train data from DB
+    const fetchTrains = useCallback(async () => {
+        try {
+            const res = await axios.get(API_ENDPOINTS.TRAINS(userId), { headers: authHeader });
+            setTrains(res.data);
+            setTrainsLoaded(true);
+        } catch { /* Fallback to static data if backend not running */ }
+    }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+    // Fetch booking history for this user
+    const fetchBookings = useCallback(async () => {
+        try {
+            const res = await axios.get(API_ENDPOINTS.USER_BOOKINGS(userId), { headers: authHeader });
+            setBookingHistory(res.data);
+        } catch { /* silent */ }
+    }, [userId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+    // Fetch active scheduler for modal note
+    const fetchScheduler = useCallback(async () => {
+        try {
+            const res = await axios.get(API_ENDPOINTS.ADMIN_SCHEDULER, { headers: authHeader });
+            setActiveScheduler(res.data.scheduler ?? 'FCFS');
+        } catch { /* silent */ }
+    }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+    useEffect(() => {
+        if (!token) { navigate('/login'); return; }
+        fetchTrains();
+        fetchBookings();
+        fetchScheduler();
+        // Poll trains for live seat counts every 5s
+        const poll = setInterval(fetchTrains, 5000);
+        return () => clearInterval(poll);
+    }, [navigate, token, fetchTrains, fetchBookings, fetchScheduler]);
+
+    const handleLogout = () => { localStorage.clear(); navigate('/login'); };
+
+    const filteredTrains = trains.filter(t => {
         const fromMatch = !searchFrom || t.from.toLowerCase().includes(searchFrom.toLowerCase());
         const toMatch   = !searchTo   || t.to.toLowerCase().includes(searchTo.toLowerCase());
         return fromMatch && toMatch;
@@ -68,33 +113,45 @@ const Dashboard: React.FC = () => {
     const handleBook = async (e: React.FormEvent) => {
         e.preventDefault();
         setIsLoading(true);
-        const token = localStorage.getItem('jwt_token');
         if (!token) { navigate('/login'); return; }
         try {
-            await axios.post(API_ENDPOINTS.BOOK, {
-                userId: Math.floor(Math.random() * 1000) + 1,
-                seatsNeeded: seatsToBook, isTatkal: false,
-            }, { headers: { Authorization: `Bearer ${token}` } });
-
-            const booking: Booking = {
-                id: Date.now(),
+            const res = await axios.post(API_ENDPOINTS.BOOK, {
+                userId,
+                seatsNeeded: seatsToBook,
+                isTatkal: false,
                 trainNumber: selectedTrain!.trainNumber,
-                trainName: selectedTrain!.trainName,
-                from: selectedTrain!.from,
-                to: selectedTrain!.to,
-                departure: selectedTrain!.departure,
-                seats: seatsToBook,
-                totalPrice: selectedTrain!.price * seatsToBook,
-                bookingDate: new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }),
-                pnr: genPNR(),
-                status: 'Confirmed',
                 passengerName,
-            };
-            setBookingHistory(prev => [booking, ...prev]);
-            setBookingSuccess(true);
-            setShowModal(false);
-            setPassengerName(''); setPassengerAge(''); setSeatsToBook(1);
-            setActiveTab('bookings');
+            }, { headers: authHeader });
+
+            if (res.data.success) {
+                const booking: Booking = {
+                    id: res.data.id ?? Date.now(),
+                    trainNumber: selectedTrain!.trainNumber,
+                    trainName: res.data.trainName ?? selectedTrain!.trainName,
+                    from: res.data.from ?? selectedTrain!.from,
+                    to: res.data.to ?? selectedTrain!.to,
+                    departure: res.data.departure ?? selectedTrain!.departure,
+                    seats: seatsToBook,
+                    totalPrice: res.data.totalPrice ?? (selectedTrain!.price * seatsToBook + seatsToBook * 30),
+                    bookingDate: res.data.bookingDate ?? new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }),
+                    pnr: res.data.pnr,
+                    status: res.data.status ?? 'Confirmed',
+                    passengerName,
+                };
+                setBookingHistory(prev => [booking, ...prev]);
+                // Optimistically reduce seat count in local state
+                setTrains(prev => prev.map(t =>
+                    t.trainNumber === selectedTrain!.trainNumber
+                        ? { ...t, availableSeats: Math.max(0, t.availableSeats - seatsToBook) }
+                        : t
+                ));
+                setBookingSuccess(true);
+                setShowModal(false);
+                setPassengerName(''); setPassengerAge(''); setSeatsToBook(1);
+                setActiveTab('bookings');
+            } else {
+                alert(res.data.message || 'Booking failed.');
+            }
         } catch {
             alert('Booking failed. Please ensure Spring Boot is running.');
         } finally {
@@ -118,10 +175,7 @@ const Dashboard: React.FC = () => {
                         <button
                             key={tab}
                             onClick={() => { setActiveTab(tab); setBookingSuccess(false); }}
-                            style={{
-                                ...S.navTab,
-                                ...(activeTab === tab ? S.navTabActive : {}),
-                            }}
+                            style={{ ...S.navTab, ...(activeTab === tab ? S.navTabActive : {}) }}
                         >
                             {tab === 'search' ? '🔍 Find Trains' : `📋 My Bookings${bookingHistory.length ? ` (${bookingHistory.length})` : ''}`}
                         </button>
@@ -132,9 +186,7 @@ const Dashboard: React.FC = () => {
                         <span style={S.userAvatar}>{username[0].toUpperCase()}</span>
                         <span style={S.userName}>{username}</span>
                     </div>
-                    <button onClick={handleLogout} className="btn-danger" style={{ fontSize: 13 }}>
-                        Sign Out
-                    </button>
+                    <button onClick={handleLogout} className="btn-danger" style={{ fontSize: 13 }}>Sign Out</button>
                 </div>
             </nav>
 
@@ -147,17 +199,12 @@ const Dashboard: React.FC = () => {
                         <div style={S.searchHero}>
                             <div style={S.heroGlow} />
                             <h1 style={S.heroTitle}>Where are you travelling?</h1>
-                            <p style={S.heroSub}>Search from {TRAINS.length} trains across India</p>
+                            <p style={S.heroSub}>Search from {trains.length} trains across India {trainsLoaded && <span style={{ color: '#10B981', fontSize: 12 }}>● Live</span>}</p>
                             <div style={S.searchBar}>
                                 <div style={S.searchField}>
                                     <span style={S.searchIcon}>📍</span>
-                                    <input
-                                        style={S.searchInput}
-                                        placeholder="From (e.g. Mumbai)"
-                                        value={searchFrom}
-                                        onChange={e => setSearchFrom(e.target.value)}
-                                        id="search-from"
-                                    />
+                                    <input style={S.searchInput} placeholder="From (e.g. Mumbai)" value={searchFrom}
+                                        onChange={e => setSearchFrom(e.target.value)} id="search-from" />
                                 </div>
                                 <div style={S.searchDivider}>
                                     <div style={S.dividerLine} />
@@ -166,27 +213,15 @@ const Dashboard: React.FC = () => {
                                 </div>
                                 <div style={S.searchField}>
                                     <span style={S.searchIcon}>🏁</span>
-                                    <input
-                                        style={S.searchInput}
-                                        placeholder="To (e.g. Delhi)"
-                                        value={searchTo}
-                                        onChange={e => setSearchTo(e.target.value)}
-                                        id="search-to"
-                                    />
+                                    <input style={S.searchInput} placeholder="To (e.g. Delhi)" value={searchTo}
+                                        onChange={e => setSearchTo(e.target.value)} id="search-to" />
                                 </div>
                                 <div style={S.searchField}>
                                     <span style={S.searchIcon}>📅</span>
-                                    <input
-                                        style={{ ...S.searchInput, colorScheme: 'dark' }}
-                                        type="date"
-                                        value={searchDate}
-                                        onChange={e => setSearchDate(e.target.value)}
-                                        id="search-date"
-                                    />
+                                    <input style={{ ...S.searchInput, colorScheme: 'dark' }} type="date" value={searchDate}
+                                        onChange={e => setSearchDate(e.target.value)} id="search-date" />
                                 </div>
-                                <button className="btn-accent" style={{ padding: '0 32px', borderRadius: 14, fontSize: 15, fontWeight: 700 }}>
-                                    Search
-                                </button>
+                                <button className="btn-accent" style={{ padding: '0 32px', borderRadius: 14, fontSize: 15, fontWeight: 700 }}>Search</button>
                             </div>
                         </div>
 
@@ -248,11 +283,12 @@ const Dashboard: React.FC = () => {
                                         </div>
                                         <button
                                             className="btn-primary"
-                                            style={{ padding: '10px 24px', fontSize: 14 }}
-                                            onClick={() => { setSelectedTrain(train); setShowModal(true); setBookingSuccess(false); }}
+                                            style={{ padding: '10px 24px', fontSize: 14, opacity: train.availableSeats === 0 ? 0.5 : 1 }}
+                                            onClick={() => { if (train.availableSeats > 0) { setSelectedTrain(train); setShowModal(true); setBookingSuccess(false); } }}
+                                            disabled={train.availableSeats === 0}
                                             id={`book-${train.trainNumber}`}
                                         >
-                                            Book Now →
+                                            {train.availableSeats === 0 ? 'Sold Out' : 'Book Now →'}
                                         </button>
                                     </div>
                                 </div>
@@ -266,14 +302,12 @@ const Dashboard: React.FC = () => {
                     <div style={{ animation: 'fadeUp 0.4s ease-out' }}>
                         {bookingSuccess && (
                             <div className="alert alert-success" style={{ marginBottom: 24, fontSize: 15 }}>
-                                <span>🎉</span> Booking confirmed! Your PNR has been generated.
+                                <span>🎉</span> Booking confirmed! Your PNR has been generated and saved.
                             </div>
                         )}
                         <div style={S.listHeader}>
                             <h2 style={S.listTitle}>My Bookings</h2>
-                            {bookingHistory.length > 0 && (
-                                <span style={S.listCount}>{bookingHistory.length} bookings</span>
-                            )}
+                            {bookingHistory.length > 0 && <span style={S.listCount}>{bookingHistory.length} bookings</span>}
                         </div>
 
                         {bookingHistory.length === 0 ? (
@@ -281,11 +315,7 @@ const Dashboard: React.FC = () => {
                                 <div style={S.emptyIcon}>🎫</div>
                                 <h3 style={S.emptyTitle}>No bookings yet</h3>
                                 <p style={S.emptySub}>Your confirmed tickets will appear here</p>
-                                <button
-                                    className="btn-primary"
-                                    style={{ marginTop: 20, padding: '12px 28px' }}
-                                    onClick={() => setActiveTab('search')}
-                                >
+                                <button className="btn-primary" style={{ marginTop: 20, padding: '12px 28px' }} onClick={() => setActiveTab('search')}>
                                     Find Trains
                                 </button>
                             </div>
@@ -313,9 +343,7 @@ const Dashboard: React.FC = () => {
                                         </div>
                                         <div style={S.bookingCardRight}>
                                             <div style={S.bAmount}>₹{b.totalPrice.toLocaleString()}</div>
-                                            <div className="badge badge-green" style={{ marginTop: 8 }}>
-                                                ✅ {b.status}
-                                            </div>
+                                            <div className="badge badge-green" style={{ marginTop: 8 }}>✅ {b.status}</div>
                                         </div>
                                     </div>
                                 ))}
@@ -370,7 +398,7 @@ const Dashboard: React.FC = () => {
                                 <div style={S.seatSelector}>
                                     <button type="button" style={S.seatBtn} onClick={() => setSeatsToBook(s => Math.max(1, s - 1))}>−</button>
                                     <span style={S.seatCount}>{seatsToBook}</span>
-                                    <button type="button" style={S.seatBtn} onClick={() => setSeatsToBook(s => Math.min(6, s + 1))}>+</button>
+                                    <button type="button" style={S.seatBtn} onClick={() => setSeatsToBook(s => Math.min(6, Math.min(s + 1, selectedTrain.availableSeats)))}>+</button>
                                     <span style={S.seatHint}>seat{seatsToBook > 1 ? 's' : ''}</span>
                                 </div>
                             </div>
@@ -396,23 +424,18 @@ const Dashboard: React.FC = () => {
                                 </div>
                             </div>
 
-                            <button
-                                type="submit"
-                                disabled={isLoading}
-                                className="btn-accent"
-                                style={{ width: '100%', padding: '15px', fontSize: 15 }}
-                                id="confirm-booking"
-                            >
+                            <button type="submit" disabled={isLoading} className="btn-accent"
+                                style={{ width: '100%', padding: '15px', fontSize: 15 }} id="confirm-booking">
                                 {isLoading ? (
                                     <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10 }}>
                                         <span className="spin" style={{ display: 'inline-block', fontSize: 18 }}>⟳</span>
-                                        Processing...
+                                        Processing... (Mutex Lock active)
                                     </span>
                                 ) : '🎫 Confirm Booking'}
                             </button>
 
                             <div style={S.modalNote}>
-                                🔒 Secured by OS Mutex Lock · Scheduler: FCFS
+                                🔒 Secured by OS Mutex Lock · Active Scheduler: <strong style={{ color: '#8B84FF' }}>{activeScheduler}</strong>
                             </div>
                         </form>
                     </div>
@@ -449,15 +472,13 @@ const S: Record<string, React.CSSProperties> = {
         padding: '8px 18px', borderRadius: 8, fontSize: 14, fontWeight: 500, cursor: 'pointer',
     },
     navTabActive: {
-        background: 'rgba(108,99,255,0.12)',
-        color: '#8B84FF',
+        background: 'rgba(108,99,255,0.12)', color: '#8B84FF',
         border: '1px solid rgba(108,99,255,0.25)',
     },
     navRight: { display: 'flex', alignItems: 'center', gap: 12 },
     userPill: {
         display: 'flex', alignItems: 'center', gap: 8,
-        background: 'rgba(255,255,255,0.05)',
-        border: '1px solid rgba(255,255,255,0.08)',
+        background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.08)',
         borderRadius: 99, padding: '6px 14px 6px 8px',
     },
     userAvatar: {
@@ -498,47 +519,24 @@ const S: Record<string, React.CSSProperties> = {
         backdropFilter: 'blur(12px)',
         position: 'relative' as const, zIndex: 1,
     },
-    searchField: {
-        display: 'flex', alignItems: 'center',
-        flex: 1, gap: 10, padding: '10px 16px',
-    },
+    searchField: { display: 'flex', alignItems: 'center', flex: 1, gap: 10, padding: '10px 16px' },
     searchIcon: { fontSize: 16, flexShrink: 0, opacity: 0.6 },
-    searchInput: {
-        background: 'none', border: 'none', outline: 'none',
-        color: '#F0F2FF', fontSize: 15, width: '100%',
-        fontFamily: "'Inter', sans-serif",
-    },
-    searchDivider: {
-        display: 'flex', alignItems: 'center', flexShrink: 0, gap: 0,
-    },
+    searchInput: { background: 'none', border: 'none', outline: 'none', color: '#F0F2FF', fontSize: 15, width: '100%', fontFamily: "'Inter', sans-serif" },
+    searchDivider: { display: 'flex', alignItems: 'center', flexShrink: 0, gap: 0 },
     dividerLine: { width: 1, height: 24, background: 'rgba(255,255,255,0.1)' },
-    swapIcon: {
-        fontSize: 18, color: '#9BA3BF', padding: '0 8px', cursor: 'pointer',
-    },
+    swapIcon: { fontSize: 18, color: '#9BA3BF', padding: '0 8px', cursor: 'pointer' },
 
     /* List header */
-    listHeader: {
-        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        marginBottom: 20,
-    },
+    listHeader: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 },
     listTitle: { fontSize: 22, fontWeight: 800, color: '#F0F2FF', fontFamily: "'Space Grotesk', sans-serif" },
-    listCount: {
-        fontSize: 13, color: '#9BA3BF',
-        background: 'rgba(255,255,255,0.05)',
-        padding: '4px 12px', borderRadius: 99,
-        border: '1px solid rgba(255,255,255,0.08)',
-    },
+    listCount: { fontSize: 13, color: '#9BA3BF', background: 'rgba(255,255,255,0.05)', padding: '4px 12px', borderRadius: 99, border: '1px solid rgba(255,255,255,0.08)' },
 
     /* Train grid */
     trainGrid: { display: 'flex', flexDirection: 'column' as const, gap: 16 },
     trainCard: { padding: '24px 28px' },
     tcHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20 },
     tcHeaderLeft: { display: 'flex', flexDirection: 'column' as const, gap: 6 },
-    typeBadge: {
-        display: 'inline-block', padding: '3px 10px',
-        borderRadius: 99, fontSize: 11, fontWeight: 700,
-        letterSpacing: '0.04em', width: 'fit-content',
-    },
+    typeBadge: { display: 'inline-block', padding: '3px 10px', borderRadius: 99, fontSize: 11, fontWeight: 700, letterSpacing: '0.04em', width: 'fit-content' },
     tcTrainName: { fontSize: 18, fontWeight: 800, color: '#F0F2FF', fontFamily: "'Space Grotesk', sans-serif" },
     tcTrainNo: { fontSize: 13, color: '#5C6480' },
     tcPrice: { textAlign: 'right' as const },
@@ -550,13 +548,8 @@ const S: Record<string, React.CSSProperties> = {
     tcCity: { fontSize: 13, color: '#9BA3BF', marginTop: 2 },
     tcMid: { flex: 1, display: 'flex', flexDirection: 'column' as const, alignItems: 'center', padding: '0 24px' },
     durationLabel: { fontSize: 12, color: '#9BA3BF', fontWeight: 600, marginBottom: 8 },
-    routeLine: {
-        display: 'flex', alignItems: 'center', width: '100%', gap: 4,
-    },
-    routeDot: {
-        width: 8, height: 8, borderRadius: '50%',
-        background: '#6C63FF', flexShrink: 0,
-    },
+    routeLine: { display: 'flex', alignItems: 'center', width: '100%', gap: 4 },
+    routeDot: { width: 8, height: 8, borderRadius: '50%', background: '#6C63FF', flexShrink: 0 },
     routeTrack: { flex: 1, height: 2, background: 'linear-gradient(90deg, #6C63FF, #00D4AA)' },
     routeArrow: { fontSize: 16, color: '#9BA3BF', flexShrink: 0 },
     durationSub: { fontSize: 11, color: '#5C6480', marginTop: 6 },
@@ -565,24 +558,13 @@ const S: Record<string, React.CSSProperties> = {
     seatDot: { width: 8, height: 8, borderRadius: '50%', display: 'inline-block' },
 
     /* Bookings tab */
-    emptyState: {
-        display: 'flex', flexDirection: 'column' as const, alignItems: 'center',
-        padding: '80px 24px', textAlign: 'center' as const,
-    },
+    emptyState: { display: 'flex', flexDirection: 'column' as const, alignItems: 'center', padding: '80px 24px', textAlign: 'center' as const },
     emptyIcon: { fontSize: 64, marginBottom: 20, opacity: 0.4 },
     emptyTitle: { fontSize: 22, fontWeight: 700, color: '#F0F2FF', marginBottom: 10 },
     emptySub: { fontSize: 15, color: '#9BA3BF' },
     bookingsList: { display: 'flex', flexDirection: 'column' as const, gap: 16 },
-    bookingCard: {
-        display: 'flex', gap: 24, padding: '24px 28px',
-        alignItems: 'center',
-        background: '#181A28', border: '1px solid rgba(255,255,255,0.07)', borderRadius: 18,
-    },
-    bookingCardLeft: {
-        textAlign: 'center' as const, flexShrink: 0,
-        padding: '16px 24px 16px 0',
-        borderRight: '1px solid rgba(255,255,255,0.07)',
-    },
+    bookingCard: { display: 'flex', gap: 24, padding: '24px 28px', alignItems: 'center', background: '#181A28', border: '1px solid rgba(255,255,255,0.07)', borderRadius: 18 },
+    bookingCardLeft: { textAlign: 'center' as const, flexShrink: 0, padding: '16px 24px 16px 0', borderRight: '1px solid rgba(255,255,255,0.07)' },
     pnrLabel: { fontSize: 10, color: '#5C6480', fontWeight: 700, letterSpacing: '0.1em', marginBottom: 4 },
     pnrValue: { fontSize: 14, fontWeight: 800, color: '#8B84FF', fontFamily: 'monospace', marginBottom: 6 },
     bookingDate: { fontSize: 11, color: '#9BA3BF' },
@@ -596,36 +578,13 @@ const S: Record<string, React.CSSProperties> = {
     bAmount: { fontSize: 22, fontWeight: 900, color: '#00D4AA', fontFamily: "'Space Grotesk', sans-serif" },
 
     /* Modal */
-    overlay: {
-        position: 'fixed' as const, inset: 0,
-        background: 'rgba(0,0,0,0.8)', backdropFilter: 'blur(8px)',
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        zIndex: 200, padding: 24,
-    },
-    modal: {
-        background: '#181A28',
-        border: '1px solid rgba(255,255,255,0.1)',
-        borderRadius: 24, padding: '36px 40px',
-        width: '100%', maxWidth: 480,
-        maxHeight: '90vh', overflowY: 'auto' as const,
-        boxShadow: '0 40px 100px rgba(0,0,0,0.8)',
-    },
-    modalHeader: {
-        display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start',
-        marginBottom: 24,
-    },
+    overlay: { position: 'fixed' as const, inset: 0, background: 'rgba(0,0,0,0.8)', backdropFilter: 'blur(8px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 200, padding: 24 },
+    modal: { background: '#181A28', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 24, padding: '36px 40px', width: '100%', maxWidth: 480, maxHeight: '90vh', overflowY: 'auto' as const, boxShadow: '0 40px 100px rgba(0,0,0,0.8)' },
+    modalHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 24 },
     modalTitle: { fontSize: 22, fontWeight: 800, color: '#F0F2FF', fontFamily: "'Space Grotesk', sans-serif", marginBottom: 4 },
     modalSub: { fontSize: 13, color: '#9BA3BF' },
-    closeBtn: {
-        background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)',
-        borderRadius: 8, padding: '6px 10px', color: '#9BA3BF',
-        fontSize: 16, cursor: 'pointer',
-    },
-    routeSummary: {
-        display: 'flex', alignItems: 'center',
-        background: 'rgba(108,99,255,0.08)', border: '1px solid rgba(108,99,255,0.2)',
-        borderRadius: 14, padding: '16px 20px', marginBottom: 24,
-    },
+    closeBtn: { background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 8, padding: '6px 10px', color: '#9BA3BF', fontSize: 16, cursor: 'pointer' },
+    routeSummary: { display: 'flex', alignItems: 'center', background: 'rgba(108,99,255,0.08)', border: '1px solid rgba(108,99,255,0.2)', borderRadius: 14, padding: '16px 20px', marginBottom: 24 },
     routeCity: { fontSize: 18, fontWeight: 800, color: '#F0F2FF', fontFamily: "'Space Grotesk', sans-serif" },
     rcSmall: { fontSize: 12, color: '#9BA3BF', fontWeight: 400 },
     routeMid: { flex: 1, display: 'flex', flexDirection: 'column' as const, alignItems: 'center', gap: 6, padding: '0 16px' },
@@ -633,25 +592,15 @@ const S: Record<string, React.CSSProperties> = {
     durationTag: { fontSize: 11, color: '#9BA3BF', fontWeight: 600 },
     modalForm: { display: 'flex', flexDirection: 'column' as const, gap: 20 },
     seatSelector: { display: 'flex', alignItems: 'center', gap: 16, marginTop: 4 },
-    seatBtn: {
-        width: 38, height: 38, borderRadius: 10,
-        background: 'rgba(108,99,255,0.15)', border: '1px solid rgba(108,99,255,0.3)',
-        color: '#8B84FF', fontSize: 18, fontWeight: 700, cursor: 'pointer',
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-    },
+    seatBtn: { width: 38, height: 38, borderRadius: 10, background: 'rgba(108,99,255,0.15)', border: '1px solid rgba(108,99,255,0.3)', color: '#8B84FF', fontSize: 18, fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' },
     seatCount: { fontSize: 24, fontWeight: 900, color: '#F0F2FF', minWidth: 32, textAlign: 'center' as const },
     seatHint: { fontSize: 14, color: '#9BA3BF' },
-    fareBox: {
-        background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.07)',
-        borderRadius: 12, padding: '16px 20px',
-    },
+    fareBox: { background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.07)', borderRadius: 12, padding: '16px 20px' },
     fareRow: { display: 'flex', justifyContent: 'space-between', padding: '6px 0', fontSize: 14 },
     fareKey: { color: '#9BA3BF' },
     fareVal: { color: '#F0F2FF', fontWeight: 500 },
     fareTotal: { fontSize: 17, fontWeight: 800, color: '#F0F2FF', paddingTop: 8 },
-    modalNote: {
-        textAlign: 'center' as const, fontSize: 12, color: '#5C6480', marginTop: 4,
-    },
+    modalNote: { textAlign: 'center' as const, fontSize: 12, color: '#5C6480', marginTop: 4 },
 };
 
 export default Dashboard;

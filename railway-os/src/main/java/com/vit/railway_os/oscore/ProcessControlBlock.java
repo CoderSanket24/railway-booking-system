@@ -14,8 +14,9 @@ public class ProcessControlBlock {
     private int burstTime;  // Expected execution time
     private int remainingTime;
     private String processType; // "STANDARD" or "TATKAL"
+    private OsStateTracker tracker;
     
-    public ProcessControlBlock(int processId, int burstTime, int priority, String processType) {
+    public ProcessControlBlock(int processId, int burstTime, int priority, String processType, OsStateTracker tracker) {
         this.processId = processId;
         this.state = ProcessState.NEW;
         this.priority = priority;
@@ -23,6 +24,12 @@ public class ProcessControlBlock {
         this.remainingTime = burstTime;
         this.arrivalTime = System.currentTimeMillis();
         this.processType = processType;
+        this.tracker = tracker;
+        
+        // Record initial state
+        if (tracker != null) {
+            tracker.recordProcessStateChange(processId, null, ProcessState.NEW, burstTime, processType);
+        }
     }
     
     // Scheduling Metrics
@@ -43,6 +50,9 @@ public class ProcessControlBlock {
     public ProcessState getState() { return state; }
     public void setState(ProcessState state) { 
         System.out.println("[PCB] Process " + processId + " state: " + this.state + " → " + state);
+        if (tracker != null) {
+            tracker.recordProcessStateChange(processId, this.state, state, burstTime, processType);
+        }
         this.state = state; 
     }
     

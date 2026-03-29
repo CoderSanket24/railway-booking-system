@@ -18,6 +18,12 @@ public class TicketBuffer {
     private Semaphore full = new Semaphore(0);            // Count filled slots
     private Semaphore mutex = new Semaphore(1);           // Mutual exclusion
     
+    private OsStateTracker tracker;
+    
+    public TicketBuffer(OsStateTracker tracker) {
+        this.tracker = tracker;
+    }
+    
     /**
      * Producer: Generate tickets and add to buffer
      */
@@ -27,6 +33,8 @@ public class TicketBuffer {
         
         buffer.add(ticket);
         System.out.println("[PRODUCER] Generated ticket: " + ticket + " | Buffer size: " + buffer.size());
+        
+        if (tracker != null) tracker.updateBufferCount(buffer.size());
         
         mutex.release();  // Exit critical section
         full.release();   // Signal that buffer has item
@@ -41,6 +49,8 @@ public class TicketBuffer {
         
         Ticket ticket = buffer.poll();
         System.out.println("[CONSUMER] Booked ticket: " + ticket + " | Buffer size: " + buffer.size());
+        
+        if (tracker != null) tracker.updateBufferCount(buffer.size());
         
         mutex.release();  // Exit critical section
         empty.release();  // Signal that buffer has space

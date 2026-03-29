@@ -14,11 +14,12 @@ import java.util.Map;
 
 @RestController
 @RequestMapping("/api/admin")
-@CrossOrigin(origins = "*")
 public class AdminController {
 
     @Autowired
     private FCFSScheduler fcfsScheduler;
+    
+    private TrainPreparationStation diningSim;
 
     @Autowired
     private SJFScheduler sjfScheduler;
@@ -32,18 +33,27 @@ public class AdminController {
     @Autowired
     private AvailabilityMonitor availabilityMonitor;
 
+    @Autowired
+    private OsStateTracker tracker;
+
     // System-wide scheduler configuration
     private static String currentScheduler = "FCFS"; // Default scheduler
 
     @GetMapping("/monitor")
-    public Map<String, Integer> getOsMetrics() {
+    public Map<String, Object> getOsMetrics() {
         // Gathers the live OS data from your multithreaded environment
-        Map<String, Integer> metrics = new HashMap<>();
+        Map<String, Object> metrics = new HashMap<>();
         metrics.put("fcfsQueueSize", fcfsScheduler.getQueueSize());
         metrics.put("sjfQueueSize", sjfScheduler.getQueueSize());
         metrics.put("roundRobinQueueSize", roundRobinScheduler.getQueueSize());
         metrics.put("priorityQueueSize", priorityScheduler.getQueueSize());
         metrics.put("activeReaders", availabilityMonitor.getActiveReaders());
+        
+        // Deep OS details for UI visualization
+        metrics.put("recentProcesses", tracker.getRecentProcesses());
+        metrics.put("mutexState", tracker.getMutexState());
+        metrics.put("ticketsInBuffer", tracker.getTicketsInBuffer());
+        metrics.put("philosophers", tracker.getPhilosopherStates());
 
         return metrics; // Spring Boot automatically converts this to JSON!
     }
@@ -68,5 +78,22 @@ public class AdminController {
 
     public static String getSystemScheduler() {
         return currentScheduler;
+    }
+
+    @PostMapping("/start-dining-philosophers")
+    public Map<String, String> startDiningPhilosophers() {
+        if (diningSim != null) {
+            diningSim.stopSimulation();
+        }
+        
+        // Clear previous states
+        for(int i = 0; i < 5; i++) {
+           tracker.updatePhilosopherState(i, "THINKING (Resting)");
+        }
+
+        diningSim = new TrainPreparationStation(tracker);
+        diningSim.startSimulation();
+        
+        return Map.of("status", "success", "message", "Dining Philosophers simulation started with 5 crews.");
     }
 }

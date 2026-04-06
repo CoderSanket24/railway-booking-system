@@ -272,5 +272,100 @@ railway-os/src/main/java/com/vit/railway_os/oscore/
 │
 ├── TicketBuffer.java          # Bounded buffer (wait/notify)
 ├── TicketProducer.java        # Producer thread (500ms interval)
-└── TicketConsumer.java        # Consumer thread
+├── TicketConsumer.java        # Consumer thread
+│
+├── TrainPreparationStation.java  # Dining Philosophers table
+├── TrainCrew.java                # Philosopher thread
+│
+│── ─── UNIT IV: DEADLOCKS ────────────────────────────────────────────────────
+├── BankersAlgorithm.java         # Banker's Algorithm (Deadlock Avoidance)
+├── ResourceAllocationGraph.java  # RAG + DFS cycle detection (Deadlock Detection)
+├── DeadlockRecovery.java         # Process Termination + Resource Preemption
+│
+│── ─── UNIT V: MEMORY MANAGEMENT ─────────────────────────────────────────────
+├── MemoryPartitionManager.java   # Fixed/Dynamic + First/Best/Next/Worst Fit
+├── BuddySystem.java              # Buddy System (split + merge)
+├── PageReplacementSimulator.java # FIFO, LRU, Optimal, Clock
+├── TLBSimulator.java             # TLB + Address Translation + EMAT
+│
+│── ─── UNIT VI: I/O & FILE MANAGEMENT ────────────────────────────────────────
+├── DiskScheduler.java            # FCFS, SSTF, SCAN, C-SCAN
+├── IOBufferManager.java          # Single / Double / Circular Buffering
+└── FileManagementSimulator.java  # Sequential/Indexed/Linked + Directories
 ```
+
+---
+
+## 📌 Unit IV — Deadlocks
+
+### Concept 6 — Banker's Algorithm (`BankersAlgorithm.java`)
+Resources = seat types: `AC_SEATS`, `SLEEPER_SEATS`, `GENERAL_SEATS`
+
+```
+POST /api/admin/bankers/safety           → run safety algorithm
+POST /api/admin/bankers/request          { "pid":1, "request":[1,0,2] }
+```
+
+### Concept 7 — Resource Allocation Graph + Detection (`ResourceAllocationGraph.java`)
+```
+POST /api/admin/deadlock/simulate        { "scenario":"DEADLOCK" }
+POST /api/admin/deadlock/detect          → { deadlocked: true, cycle: [1,2,3,1] }
+```
+
+### Concept 8 — Deadlock Recovery (`DeadlockRecovery.java`)
+```
+POST /api/admin/deadlock/recover         { "strategy":"TERMINATION" | "PREEMPTION" }
+POST /api/admin/deadlock/recovery/reset
+```
+
+---
+
+## 📌 Unit V — Memory Management
+
+### Concept 9 — Memory Partitioning (`MemoryPartitionManager.java`)
+```
+POST /api/admin/memory/allocate-fixed    { "pid":10, "sizeKB":64 }
+POST /api/admin/memory/allocate-dynamic  { "pid":11, "sizeKB":200, "strategy":"BEST_FIT" }
+```
+
+### Concept 10 — Buddy System (`BuddySystem.java`)
+```
+POST /api/admin/buddy/allocate     { "pid":5, "sizeKB":70 }
+POST /api/admin/buddy/deallocate   { "address":128 }
+```
+
+### Concept 11 — Page Replacement (`PageReplacementSimulator.java`)
+```
+POST /api/admin/page-replacement   { "frames":4, "references":[1,2,3,4,1,2,5] }
+```
+Returns FIFO, LRU, Optimal, Clock results side-by-side.
+
+### Concept 12 — TLB + Address Translation (`TLBSimulator.java`)
+```
+POST /api/admin/tlb/demo
+POST /api/admin/tlb/translate      { "logicalAddress": 544 }
+POST /api/admin/tlb/flush
+```
+
+---
+
+## 📌 Unit VI — I/O & File Management
+
+### Concept 13 — Disk Scheduling (`DiskScheduler.java`)
+```
+POST /api/admin/disk-scheduling    { "head":50, "requests":[82,170,43,140,24,16,190] }
+```
+Returns FCFS, SSTF, SCAN, C-SCAN comparison.
+
+### Concept 14 — I/O Buffering (`IOBufferManager.java`)
+```
+POST /api/admin/io-buffer/demo     { "type":"DOUBLE" | "SINGLE" | "CIRCULAR" }
+```
+
+### Concept 15 — File Management (`FileManagementSimulator.java`)
+```
+POST /api/admin/file-system/read   { "fileName":"12951_2024-06-15.bkr", "recordIndex":3 }
+POST /api/admin/file-system/write  { "fileName":"...", "record":"BK999:User42→Seat-A3" }
+POST /api/admin/file-system/share  { "fileName":"...", "user":"User42", "mode":"READ" }
+```
+

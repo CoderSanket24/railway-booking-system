@@ -35,6 +35,9 @@ public class AdminController {
     @Autowired private IOBufferManager ioBufferManager;
     @Autowired private FileManagementSimulator fileManagementSimulator;
 
+    // ── Real-time OS Event Log ─────────────────────────────────────────────────
+    @Autowired private OsEventLog osEventLog;
+
     private static String currentScheduler = "FCFS";
 
     // ════════════════════════ UNIT I-III ENDPOINTS ═══════════════════════════
@@ -52,6 +55,18 @@ public class AdminController {
         metrics.put("ticketsInBuffer", tracker.getTicketsInBuffer());
         metrics.put("philosophers", tracker.getPhilosopherStates());
         return metrics;
+    }
+
+    /** Real-time OS event feed — fired by ACTUAL bookings */
+    @GetMapping("/live-events")
+    public List<OsEventLog.OsEvent> getLiveEvents(@RequestParam(defaultValue = "50") int limit) {
+        return osEventLog.getRecent(limit);
+    }
+
+    @PostMapping("/live-events/clear")
+    public Map<String, String> clearEvents() {
+        osEventLog.clear();
+        return Map.of("status", "cleared");
     }
 
     @GetMapping("/scheduler")

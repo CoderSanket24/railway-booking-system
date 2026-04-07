@@ -41,6 +41,9 @@ public class BookingController {
     @Autowired
     private BookingRepository bookingRepository;
 
+    @Autowired
+    private OsEventLog eventLog;
+
     // ─────────────────────────────────────────────────────────────
     // GET /api/trains — Return live seat counts for all trains
     // Wrapped in Readers-Writers protocol so Admin Dashboard shows active readers
@@ -49,13 +52,16 @@ public class BookingController {
     public List<Map<String, Object>> getAllTrains(@RequestParam(required = false) Integer userId) {
         int readerId = userId != null ? userId : (int)(Math.random() * 9000 + 1000);
 
-        // OS CONCEPT: Enter reader critical section
+        // OS CONCEPT: Enter reader critical section (Readers-Writers lock)
+        eventLog.pushReader("Reader P" + readerId + " acquiring shared lock on train table", readerId);
         availabilityMonitor.startRead(readerId);
         List<Train> trains;
         try {
             trains = trainRepository.findAll(); // Read shared data
+            eventLog.pushTLB("TLB lookup: seat table page for P" + readerId + " → frame cached", readerId, true);
         } finally {
             availabilityMonitor.endRead(readerId); // Exit reader critical section
+            eventLog.pushReader("Reader P" + readerId + " released shared lock", readerId);
         }
 
         List<Map<String, Object>> result = new ArrayList<>();
@@ -89,8 +95,14 @@ public class BookingController {
         String passengerName = payload.getOrDefault("passengerName", "Passenger").toString();
 
         String schedulerType = AdminController.getSystemScheduler();
-        System.out.println("[BOOKING] User " + userId + " booking " + seatsNeeded +
-                           " seats on " + trainNumber + " via " + schedulerType);
+        int pid = userId;
+
+        // ── OS events fired from real booking ──
+        eventLog.pushBooking("New booking request: " + passengerName + " → " + trainNumber + " (" + seatsNeeded + " seats)", pid, true);
+        eventLog.pushScheduler("[" + schedulerType + "] dispatching booking process P" + pid + " (burst=" + seatsNeeded * 10 + "ms)", pid);
+        eventLog.pushMemory("Allocating session memory for P" + pid + " (booking context ~64KB)", pid);
+        eventLog.pushBanker("Banker's check: P" + pid + " requesting " + seatsNeeded + " " + trainNumber + " seats — running safety algo", pid, true);
+        eventLog.pushMutex("P" + pid + " acquiring mutex lock on seat table (critical section)", pid, true);
 
         // MEMBER 1: Create process with PCB
         BookingProcess process = new BookingProcess(userId, seatsNeeded, isTatkal,
@@ -120,6 +132,13 @@ public class BookingController {
             CriticalSectionGuard.BookingResult result = process.getResult();
             Map<String, Object> response = new HashMap<>();
             if (result != null && result.success && result.booking != null) {
+                // Post-booking OS events
+                eventLog.pushMutex("P" + pid + " releasing mutex lock — seat table updated", pid, false);
+                eventLog.pushFileIO("Writing booking record " + result.booking.getPnr() + " to disk (INDEXED file org)", pid, true);
+                eventLog.pushTLB("TLB hit: booking page for P" + pid + " → physical frame 0x" + Integer.toHexString(pid % 256), pid, true);
+                eventLog.pushMemory("Deallocating session memory for P" + pid + " (booking committed)", pid);
+                eventLog.pushBooking("✅ Booking CONFIRMED: " + result.booking.getPnr() + " | " + passengerName + " | " + trainNumber, pid, true);
+
                 response.put("success", true);
                 response.put("pnr", result.booking.getPnr());
                 response.put("message", "Booking confirmed! (Scheduler: " + schedulerType + ")");
@@ -133,6 +152,8 @@ public class BookingController {
                 response.put("status", result.booking.getStatus());
                 response.put("passengerName", result.booking.getPassengerName());
             } else {
+                eventLog.pushMutex("P" + pid + " releasing mutex — booking failed", pid, false);
+                eventLog.pushBooking("❌ Booking FAILED for P" + pid + ": " + (result != null ? result.message : "unknown error"), pid, false);
                 response.put("success", false);
                 response.put("message", result != null ? result.message : "Booking failed.");
             }
@@ -140,6 +161,7 @@ public class BookingController {
 
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
+            eventLog.pushBooking("⚠️ Booking INTERRUPTED for P" + pid, pid, false);
             return Map.of("success", false, "message", "Booking interrupted.");
         }
     }

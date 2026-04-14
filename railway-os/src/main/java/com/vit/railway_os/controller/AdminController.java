@@ -79,6 +79,7 @@ public class AdminController {
         String s = payload.get("scheduler");
         if (s != null && (s.equals("FCFS") || s.equals("SJF") || s.equals("RR") || s.equals("PRIORITY"))) {
             currentScheduler = s;
+            osEventLog.pushScheduler("[ADMIN] CPU Scheduler changed to " + s + " — all new bookings dispatched via " + s, 0);
             System.out.println("[ADMIN] Scheduler changed to: " + currentScheduler);
             return Map.of("status", "success", "scheduler", currentScheduler);
         }

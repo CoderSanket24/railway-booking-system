@@ -88,16 +88,17 @@ const AdminDashboard: React.FC = () => {
   const prevTs = useRef<Set<number>>(new Set());
 
   const token = localStorage.getItem('jwt_token');
-  const authH = { headers: { Authorization: `Bearer ${token}` } };
+  // Stable ref so useEffect deps don't trigger infinite loop
+  const authH = useRef({ headers: { Authorization: `Bearer ${token}` } });
 
   useEffect(() => {
-    if (!token) { navigate('/login'); return; }
+    if (!token) { navigate('/admin-login'); return; }
     const fetchAll = async () => {
       try {
         const [mRes, sRes, eRes] = await Promise.all([
-          axios.get(API_ENDPOINTS.ADMIN_MONITOR,              authH),
-          axios.get(API_ENDPOINTS.ADMIN_SCHEDULER,            authH),
-          axios.get(`${API_ENDPOINTS.LIVE_EVENTS}?limit=100`, authH),
+          axios.get(API_ENDPOINTS.ADMIN_MONITOR,              authH.current),
+          axios.get(API_ENDPOINTS.ADMIN_SCHEDULER,            authH.current),
+          axios.get(`${API_ENDPOINTS.LIVE_EVENTS}?limit=100`, authH.current),
         ]);
         setMetrics(mRes.data);
         setScheduler(sRes.data.scheduler ?? 'FCFS');
@@ -121,16 +122,25 @@ const AdminDashboard: React.FC = () => {
 
   const changeScheduler = async (s: string) => {
     setSchedChanging(true);
-    try { await axios.post(API_ENDPOINTS.ADMIN_SCHEDULER, { scheduler: s }, authH); setScheduler(s); }
+    try { await axios.post(API_ENDPOINTS.ADMIN_SCHEDULER, { scheduler: s }, authH.current); setScheduler(s); }
     finally { setSchedChanging(false); }
   };
-  const clearEvents   = async () => { await axios.post(API_ENDPOINTS.LIVE_EVENTS_CLEAR, {}, authH); setEvents([]); prevTs.current.clear(); };
-  const startDining   = async () => { try { await axios.post(API_ENDPOINTS.START_DINING_PHILOSOPHERS, {}, authH); } catch { /**/ } };
+  const clearEvents   = async () => { await axios.post(API_ENDPOINTS.LIVE_EVENTS_CLEAR, {}, authH.current); setEvents([]); prevTs.current.clear(); };
+  const startDining   = async () => { try { await axios.post(API_ENDPOINTS.START_DINING_PHILOSOPHERS, {}, authH.current); } catch { /**/ } };
   const handleLogout  = () => { localStorage.clear(); navigate('/admin-login'); };
 
   const fmtUp = `${String(Math.floor(uptime / 3600)).padStart(2,'0')}:${String(Math.floor((uptime % 3600)/60)).padStart(2,'0')}:${String(uptime % 60).padStart(2,'0')}`;
   const mx    = metrics.mutexState || { isLocked: false, lockedByPid: null };
-  const totalQ = metrics.fcfsQueueSize + metrics.sjfQueueSize + metrics.roundRobinQueueSize + metrics.priorityQueueSize;
+  const totalQ = (metrics.fcfsQueueSize ?? 0) + (metrics.sjfQueueSize ?? 0) + (metrics.roundRobinQueueSize ?? 0) + (metrics.priorityQueueSize ?? 0);
+
+  // Map scheduler key → correct metrics field
+  const getQueueSize = (key: string) => {
+    if (key === 'FCFS')     return metrics.fcfsQueueSize ?? 0;
+    if (key === 'SJF')      return metrics.sjfQueueSize ?? 0;
+    if (key === 'RR')       return metrics.roundRobinQueueSize ?? 0;
+    if (key === 'PRIORITY') return metrics.priorityQueueSize ?? 0;
+    return 0;
+  };
 
   const displayed = filterType === 'ALL' ? events : events.filter(e => e.type === filterType);
 
@@ -330,8 +340,7 @@ const AdminDashboard: React.FC = () => {
               </div>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
                 {SCHEDULERS.map(sc => {
-                  const qKey = (sc.key.toLowerCase().replace('-','') + 'QueueSize') as keyof OsMetrics;
-                  const qSize = (metrics[qKey] as number) ?? 0;
+                  const qSize = getQueueSize(sc.key);
                   const isActive = scheduler === sc.key;
                   return (
                     <button key={sc.key} onClick={() => changeScheduler(sc.key)} disabled={schedChanging}

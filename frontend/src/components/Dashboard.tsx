@@ -59,6 +59,7 @@ const Dashboard: React.FC = () => {
     const [bookingHistory, setBookingHistory] = useState<Booking[]>([]);
     const [showModal, setShowModal]         = useState(false);
     const [bookingSuccess, setBookingSuccess] = useState(false);
+    const [bookingError, setBookingError]   = useState('');
     const [isLoading, setIsLoading]         = useState(false);
     const [activeTab, setActiveTab]         = useState<'search' | 'bookings'>('search');
     const [activeScheduler, setActiveScheduler] = useState('FCFS');
@@ -113,6 +114,7 @@ const Dashboard: React.FC = () => {
     const handleBook = async (e: React.FormEvent) => {
         e.preventDefault();
         setIsLoading(true);
+        setBookingError('');
         if (!token) { navigate('/login'); return; }
         try {
             const res = await axios.post(API_ENDPOINTS.BOOK, {
@@ -150,10 +152,10 @@ const Dashboard: React.FC = () => {
                 setPassengerName(''); setPassengerAge(''); setSeatsToBook(1);
                 setActiveTab('bookings');
             } else {
-                alert(res.data.message || 'Booking failed.');
+                setBookingError(res.data.message || 'Booking failed. Please try again.');
             }
         } catch {
-            alert('Booking failed. Please ensure Spring Boot is running.');
+            setBookingError('Network error. Please ensure the server is running.');
         } finally {
             setIsLoading(false);
         }
@@ -284,7 +286,7 @@ const Dashboard: React.FC = () => {
                                         <button
                                             className="btn-primary"
                                             style={{ padding: '10px 24px', fontSize: 14, opacity: train.availableSeats === 0 ? 0.5 : 1 }}
-                                            onClick={() => { if (train.availableSeats > 0) { setSelectedTrain(train); setShowModal(true); setBookingSuccess(false); } }}
+                                            onClick={() => { if (train.availableSeats > 0) { setSelectedTrain(train); setShowModal(true); setBookingSuccess(false); setBookingError(''); } }}
                                             disabled={train.availableSeats === 0}
                                             id={`book-${train.trainNumber}`}
                                         >
@@ -423,6 +425,13 @@ const Dashboard: React.FC = () => {
                                     <span style={{ color: '#00D4AA' }}>₹{(selectedTrain.price * seatsToBook + seatsToBook * 30).toLocaleString()}</span>
                                 </div>
                             </div>
+
+                            {/* Error inside modal */}
+                            {bookingError && (
+                                <div style={{ padding: '10px 14px', background: '#EF444415', border: '1px solid #EF444433', borderRadius: 10, color: '#FCA5A5', fontSize: 12, marginBottom: -8 }}>
+                                    ⚠️ {bookingError}
+                                </div>
+                            )}
 
                             <button type="submit" disabled={isLoading} className="btn-accent"
                                 style={{ width: '100%', padding: '15px', fontSize: 15 }} id="confirm-booking">

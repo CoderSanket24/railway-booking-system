@@ -129,7 +129,7 @@ const AdminDashboard: React.FC = () => {
       } catch { setConnected(false); }
     };
     fetchAll();
-    const poll   = setInterval(fetchAll, 1200);
+    const poll   = setInterval(fetchAll, 400);   // 400ms — read lock held 300ms, >75% catch rate
     const uptick = setInterval(() => setUptime(u => u + 1), 1000);
     return () => { clearInterval(poll); clearInterval(uptick); };
   }, [navigate, token, paused]); // eslint-disable-line
@@ -247,7 +247,7 @@ const AdminDashboard: React.FC = () => {
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6,1fr)', gap: 10, marginBottom: 20 }}>
           <StatPill label="Active Scheduler" value={scheduler}                          color="#6C63FF" icon="⚙️" />
           <StatPill label="Queue Depth"       value={totalQ}                             color="#3B82F6" icon="📋" />
-          <StatPill label="Reader Sessions"   value={metrics.totalReaderSessions ?? 0}     color="#10B981" icon="👓" />
+          <StatPill label="Active Readers"    value={metrics.activeReaders}                       color="#10B981" icon="👓" />
           <StatPill label="Mutex"             value={mx.isLocked ? `LOCKED P${mx.lockedByPid}` : 'OPEN'} color={mx.isLocked ? '#EF4444' : '#10B981'} icon={mx.isLocked ? '🔒' : '🔓'} />
           <StatPill label="Buffer Items"      value={metrics.ticketsInBuffer ?? 0}       color="#F59E0B" icon="📦" />
           <StatPill label="OS Events"         value={events.length}                      color="#8B5CF6" icon="📡" />
@@ -498,9 +498,9 @@ const AdminDashboard: React.FC = () => {
                   {
                     label: 'Readers-Writers — Train Availability',
                     sub: 'Multiple users can read concurrently; bookings wait for exclusive write lock',
-                    big: `${metrics.totalReaderSessions ?? 0} total reader session${(metrics.totalReaderSessions ?? 0) !== 1 ? 's' : ''}`,
-                    extra: `Peak concurrent: ${metrics.peakConcurrentReaders ?? 0}  ·  Active now: ${metrics.activeReaders} (resets <5ms — see live feed)`,
-                    color: '#3B82F6',
+                    big: `${metrics.activeReaders} concurrent reader${metrics.activeReaders !== 1 ? 's' : ''} active`,
+                    extra: `Total sessions: ${metrics.totalReaderSessions ?? 0}  ·  Peak concurrent: ${metrics.peakConcurrentReaders ?? 0}`,
+                    color: '#10B981',
                   },
                   {
                     label: 'Producer-Consumer Buffer (Ticket Queue)',

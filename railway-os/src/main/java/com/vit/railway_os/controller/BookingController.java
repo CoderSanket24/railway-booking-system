@@ -64,10 +64,16 @@ public class BookingController {
         // OS CONCEPT: Enter reader critical section (Readers-Writers lock)
         eventLog.pushReader("Reader P" + readerId + " acquiring shared lock on train table", readerId);
         availabilityMonitor.startRead(readerId);
-        List<Train> trains;
+        List<Train> trains = new ArrayList<>();
         try {
             trains = trainRepository.findAll(); // Read shared data
+            // OS CONCEPT: Model realistic read I/O time — lock held during data processing.
+            // Real DB reads involve disk seek + transfer latency. This 300ms hold makes
+            // concurrent readers visible to the Admin monitor (which polls every 400ms).
+            Thread.sleep(300);
             eventLog.pushTLB("TLB lookup: seat table page for P" + readerId + " → frame cached", readerId, true);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
         } finally {
             availabilityMonitor.endRead(readerId); // Exit reader critical section
             eventLog.pushReader("Reader P" + readerId + " released shared lock", readerId);

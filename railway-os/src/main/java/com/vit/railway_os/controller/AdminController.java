@@ -5,6 +5,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.*;
+import java.util.LinkedHashMap;
 
 @RestController
 @RequestMapping("/api/admin")
@@ -17,7 +18,7 @@ public class AdminController {
     @Autowired private PriorityScheduler priorityScheduler;
     @Autowired private AvailabilityMonitor availabilityMonitor;
     @Autowired private OsStateTracker tracker;
-    private TrainPreparationStation diningSim;
+    @Autowired private TrainPlatformLock trainPlatformLock;  // Real Dining Philosophers (no simulation)
 
     // ── Unit IV — Deadlocks ────────────────────────────────────────────────────
     @Autowired private BankersAlgorithm bankersAlgorithm;
@@ -37,23 +38,28 @@ public class AdminController {
 
     // ── Real-time OS Event Log ─────────────────────────────────────────────────
     @Autowired private OsEventLog osEventLog;
+    @Autowired private SmartSchedulerSelector smartScheduler;
 
-    private static String currentScheduler = "FCFS";
+    private static String  currentScheduler  = "FCFS";
+    private static boolean autoMode          = true;   // AUTO on by default
+    private static String  lastAutoReason    = "System just started — FCFS default";
+    private static String  lastAutoAlgorithm = "FCFS";
 
     // ════════════════════════ UNIT I-III ENDPOINTS ═══════════════════════════
 
     @GetMapping("/monitor")
     public Map<String, Object> getOsMetrics() {
         Map<String, Object> metrics = new HashMap<>();
-        metrics.put("fcfsQueueSize", fcfsScheduler.getQueueSize());
-        metrics.put("sjfQueueSize", sjfScheduler.getQueueSize());
+        metrics.put("fcfsQueueSize",       fcfsScheduler.getQueueSize());
+        metrics.put("sjfQueueSize",        sjfScheduler.getQueueSize());
         metrics.put("roundRobinQueueSize", roundRobinScheduler.getQueueSize());
-        metrics.put("priorityQueueSize", priorityScheduler.getQueueSize());
-        metrics.put("activeReaders", availabilityMonitor.getActiveReaders());
-        metrics.put("recentProcesses", tracker.getRecentProcesses());
-        metrics.put("mutexState", tracker.getMutexState());
-        metrics.put("ticketsInBuffer", tracker.getTicketsInBuffer());
-        metrics.put("philosophers", tracker.getPhilosopherStates());
+        metrics.put("priorityQueueSize",   priorityScheduler.getQueueSize());
+        metrics.put("activeReaders",       tracker.getActiveReaders());
+        metrics.put("recentProcesses",     tracker.getRecentProcesses());
+        metrics.put("mutexState",          tracker.getMutexState());
+        metrics.put("ticketsInBuffer",     tracker.getTicketsInBuffer());
+        // Philosopher states come from TrainPlatformLock — updated by real bookings
+        metrics.put("philosophers",        trainPlatformLock.getPhilosopherStates());
         return metrics;
     }
 
@@ -70,31 +76,61 @@ public class AdminController {
     }
 
     @GetMapping("/scheduler")
-    public Map<String, String> getCurrentScheduler() {
-        return Map.of("scheduler", currentScheduler);
+    public Map<String, Object> getCurrentScheduler() {
+        Map<String, Object> resp = new HashMap<>();
+        resp.put("scheduler",      autoMode ? lastAutoAlgorithm : currentScheduler);
+        resp.put("autoMode",       autoMode);
+        resp.put("lastReason",     lastAutoReason);
+        resp.put("manualScheduler",currentScheduler);
+        return resp;
+    }
+
+    /** Toggle AUTO scheduling on/off.  POST /api/admin/scheduler/auto  { "auto": true } */
+    @PostMapping("/scheduler/auto")
+    public Map<String, Object> setAutoMode(@RequestBody Map<String, Object> payload) {
+        boolean newAuto = Boolean.parseBoolean(payload.getOrDefault("auto", true).toString());
+        autoMode = newAuto;
+        String msg = autoMode
+            ? "AUTO scheduling enabled — algorithm selected per-booking context"
+            : "MANUAL scheduling enabled — using " + currentScheduler + " for all bookings";
+        osEventLog.pushScheduler("[ADMIN] " + msg, 0);
+        return Map.of("status", "success", "autoMode", autoMode, "message", msg);
+    }
+
+    /** Called by BookingController to record the auto-selected decision */
+    public static void recordAutoDecision(String algorithm, String reason) {
+        lastAutoAlgorithm = algorithm;
+        lastAutoReason    = reason;
     }
 
     @PostMapping("/scheduler")
-    public Map<String, String> setScheduler(@RequestBody Map<String, String> payload) {
-        String s = payload.get("scheduler");
-        if (s != null && (s.equals("FCFS") || s.equals("SJF") || s.equals("RR") || s.equals("PRIORITY"))) {
+    public Map<String, Object> setScheduler(@RequestBody Map<String, Object> payload) {
+        String s = payload.getOrDefault("scheduler", "").toString();
+        if (s.equals("FCFS") || s.equals("SJF") || s.equals("RR") || s.equals("PRIORITY")) {
             currentScheduler = s;
-            osEventLog.pushScheduler("[ADMIN] CPU Scheduler changed to " + s + " — all new bookings dispatched via " + s, 0);
-            System.out.println("[ADMIN] Scheduler changed to: " + currentScheduler);
-            return Map.of("status", "success", "scheduler", currentScheduler);
+            autoMode = false;  // switching to a specific algo disables AUTO
+            osEventLog.pushScheduler("[ADMIN] Manual override — CPU Scheduler set to " + s, 0);
+            return Map.of("status", "success", "scheduler", currentScheduler, "autoMode", false);
         }
         return Map.of("status", "error", "message", "Invalid scheduler type");
     }
 
-    public static String getSystemScheduler() { return currentScheduler; }
+    public static String  getSystemScheduler()  { return currentScheduler; }
+    public static boolean isAutoMode()          { return autoMode; }
 
-    @PostMapping("/start-dining-philosophers")
-    public Map<String, String> startDiningPhilosophers() {
-        if (diningSim != null) diningSim.stopSimulation();
-        for (int i = 0; i < 5; i++) tracker.updatePhilosopherState(i, "THINKING (Resting)");
-        diningSim = new TrainPreparationStation(tracker);
-        diningSim.startSimulation();
-        return Map.of("status", "success", "message", "Dining Philosophers simulation started.");
+    /**
+     * Returns live Dining Philosophers state — reflects REAL concurrent booking contention.
+     * No simulation: states update only when actual bookings acquire/release platform locks.
+     */
+    @GetMapping("/philosophers")
+    public Map<String, Object> getDiningPhilosophersState() {
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("states",     trainPlatformLock.getPhilosopherStates());
+        result.put("lockStatus", trainPlatformLock.getLockStatus());
+        result.put("trains",     TrainPlatformLock.TRAIN_NUMBERS);
+        result.put("trainNames", TrainPlatformLock.TRAIN_NAMES);
+        result.put("note",       "States update only during real concurrent bookings — not a simulation");
+        return result;
     }
 
     // ════════════════════════ UNIT IV: DEADLOCKS ═════════════════════════════

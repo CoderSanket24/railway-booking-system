@@ -47,17 +47,22 @@ const StatPill: React.FC<{ label: string; value: string | number; color: string;
   </div>
 );
 
-const EventRow: React.FC<{ ev: OsEvent; isNew: boolean }> = ({ ev, isNew }) => {
+const EventRow: React.FC<{ ev: OsEvent; isNew: boolean; stepNum?: number }> = ({ ev, isNew, stepNum }) => {
   const color = EVENT_COLORS[ev.type] || '#6b7280';
   const timeStr = new Date(ev.timestamp).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
   return (
     <div style={{
-      display: 'grid', gridTemplateColumns: '26px 54px 66px 1fr 52px', gap: 8, alignItems: 'center',
+      display: 'grid', gridTemplateColumns: stepNum != null ? '28px 26px 54px 66px 1fr 52px' : '26px 54px 66px 1fr 52px', gap: 8, alignItems: 'center',
       padding: '7px 12px', borderRadius: 8, marginBottom: 3,
       background: isNew ? `${color}18` : 'transparent',
       borderLeft: `3px solid ${ev.success ? color : '#EF4444'}`,
       transition: 'background 1.5s ease', fontSize: 12,
     }}>
+      {stepNum != null && (
+        <span style={{ fontSize: 9, color: '#4b5563', fontFamily: 'monospace', fontWeight: 700, textAlign: 'right' as const }}>
+          {String(stepNum).padStart(2, '0')}
+        </span>
+      )}
       <span style={{ fontSize: 14, textAlign: 'center' as const }}>{ev.icon}</span>
       <span style={{ color: '#6b7280', fontFamily: 'monospace', fontSize: 10 }}>{timeStr}</span>
       <span style={{ background: `${color}22`, color, padding: '2px 5px', borderRadius: 4, fontWeight: 700, fontSize: 10, textAlign: 'center' as const }}>
@@ -79,12 +84,15 @@ const AdminDashboard: React.FC = () => {
   const [newIds, setNewIds]  = useState<Set<number>>(new Set());
   const [scheduler, setScheduler]     = useState('FCFS');
   const [schedChanging, setSchedChanging] = useState(false);
+  const [autoMode, setAutoMode]       = useState(true);
+  const [lastReason, setLastReason]   = useState('');
   const [connected, setConnected]     = useState(true);
   const [uptime, setUptime]           = useState(0);
   const [lastUpdated, setLastUpdated] = useState('');
   const [activePanel, setActivePanel] = useState<'live' | 'schedulers' | 'metrics'>('live');
   const [paused, setPaused]           = useState(false);
   const [filterType, setFilterType]   = useState('ALL');
+  const [orderNewest, setOrderNewest] = useState(false); // false = newest at BOTTOM (chronological)
   const prevTs = useRef<Set<number>>(new Set());
 
   const token = localStorage.getItem('jwt_token');
@@ -101,7 +109,10 @@ const AdminDashboard: React.FC = () => {
           axios.get(`${API_ENDPOINTS.LIVE_EVENTS}?limit=100`, authH.current),
         ]);
         setMetrics(mRes.data);
-        setScheduler(sRes.data.scheduler ?? 'FCFS');
+        const sd = sRes.data;
+        setScheduler(sd.scheduler ?? 'FCFS');
+        setAutoMode(sd.autoMode ?? true);
+        setLastReason(sd.lastReason ?? '');
         if (!paused) {
           const evs: OsEvent[] = eRes.data;
           const fresh = new Set(evs.filter(e => !prevTs.current.has(e.timestamp)).map(e => e.timestamp));
@@ -122,11 +133,20 @@ const AdminDashboard: React.FC = () => {
 
   const changeScheduler = async (s: string) => {
     setSchedChanging(true);
-    try { await axios.post(API_ENDPOINTS.ADMIN_SCHEDULER, { scheduler: s }, authH.current); setScheduler(s); }
-    finally { setSchedChanging(false); }
+    try {
+      await axios.post(API_ENDPOINTS.ADMIN_SCHEDULER, { scheduler: s }, authH.current);
+      setScheduler(s);
+      setAutoMode(false);
+    } finally { setSchedChanging(false); }
+  };
+  const toggleAutoMode = async () => {
+    setSchedChanging(true);
+    try {
+      const res = await axios.post(API_ENDPOINTS.ADMIN_SCHEDULER_AUTO, { auto: !autoMode }, authH.current);
+      setAutoMode(res.data.autoMode ?? !autoMode);
+    } finally { setSchedChanging(false); }
   };
   const clearEvents   = async () => { await axios.post(API_ENDPOINTS.LIVE_EVENTS_CLEAR, {}, authH.current); setEvents([]); prevTs.current.clear(); };
-  const startDining   = async () => { try { await axios.post(API_ENDPOINTS.START_DINING_PHILOSOPHERS, {}, authH.current); } catch { /**/ } };
   const handleLogout  = () => { localStorage.clear(); navigate('/admin-login'); };
 
   const fmtUp = `${String(Math.floor(uptime / 3600)).padStart(2,'0')}:${String(Math.floor((uptime % 3600)/60)).padStart(2,'0')}:${String(uptime % 60).padStart(2,'0')}`;
@@ -142,7 +162,19 @@ const AdminDashboard: React.FC = () => {
     return 0;
   };
 
-  const displayed = filterType === 'ALL' ? events : events.filter(e => e.type === filterType);
+  const displayed = (() => {
+    const filtered = filterType === 'ALL' ? events : events.filter(e => e.type === filterType);
+    // Backend sends newest-first; flip to oldest-first (chronological) by default
+    return orderNewest ? filtered : [...filtered].reverse();
+  })();
+
+  // Auto-scroll ref for chronological view
+  const feedEndRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!orderNewest && feedEndRef.current) {
+      feedEndRef.current.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [events.length, orderNewest]);
 
   /* Aggregated stats derived from real events (no simulation) */
   const countOf  = (type: string) => events.filter(e => e.type === type).length;
@@ -239,6 +271,9 @@ const AdminDashboard: React.FC = () => {
                     <option value="ALL">All Events</option>
                     {Object.keys(EVENT_COLORS).map(t => <option key={t} value={t}>{t}</option>)}
                   </select>
+                   <button onClick={() => setOrderNewest(o => !o)} style={{ padding: '5px 10px', background: '#06B6D422', color: '#06B6D4', border: '1px solid #06B6D444', borderRadius: 6, fontSize: 11, fontWeight: 700, cursor: 'pointer' }}>
+                    {orderNewest ? '↑ Newest First' : '↓ Oldest First'}
+                  </button>
                   <button onClick={() => setPaused(p => !p)} style={{ padding: '5px 10px', background: paused ? '#F59E0B22' : '#6C63FF22', color: paused ? '#F59E0B' : '#8B84FF', border: `1px solid ${paused ? '#F59E0B44' : '#6C63FF44'}`, borderRadius: 6, fontSize: 11, fontWeight: 700, cursor: 'pointer' }}>
                     {paused ? '▶ Resume' : '⏸ Pause'}
                   </button>
@@ -260,8 +295,9 @@ const AdminDashboard: React.FC = () => {
                     </div>
                   </div>
                 ) : displayed.map((ev, i) => (
-                  <EventRow key={`${ev.timestamp}-${i}`} ev={ev} isNew={newIds.has(ev.timestamp)} />
+                  <EventRow key={`${ev.timestamp}-${i}`} ev={ev} isNew={newIds.has(ev.timestamp)} stepNum={!orderNewest ? i + 1 : undefined} />
                 ))}
+                <div ref={feedEndRef} />
               </div>
             </div>
 
@@ -334,25 +370,105 @@ const AdminDashboard: React.FC = () => {
 
             {/* CPU Scheduling */}
             <div style={{ background: '#0f1423', border: '1px solid #1f2937', borderRadius: 16, padding: 22 }}>
-              <div style={{ borderLeft: '3px solid #3B82F6', paddingLeft: 12, marginBottom: 18 }}>
-                <div style={{ fontWeight: 800, fontSize: 15 }}>⚙️ CPU Scheduling — Unit III</div>
-                <div style={{ fontSize: 12, color: '#6b7280', marginTop: 2 }}>Active scheduler controls how booking processes are dispatched. Switch to change for all new bookings.</div>
+              {/* Header + AUTO/MANUAL toggle */}
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 16 }}>
+                <div style={{ borderLeft: '3px solid #3B82F6', paddingLeft: 12 }}>
+                  <div style={{ fontWeight: 800, fontSize: 15 }}>⚙️ CPU Scheduling — Unit III</div>
+                  <div style={{ fontSize: 12, color: '#6b7280', marginTop: 2 }}>
+                    {autoMode
+                      ? 'AUTO mode — system selects best algorithm per booking context'
+                      : 'MANUAL mode — admin-chosen algorithm for all bookings'}
+                  </div>
+                </div>
+                {/* AUTO / MANUAL pill toggle */}
+                <button
+                  onClick={toggleAutoMode}
+                  disabled={schedChanging}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 6,
+                    background: autoMode ? '#10B98122' : '#F59E0B22',
+                    color: autoMode ? '#10B981' : '#F59E0B',
+                    border: `1.5px solid ${autoMode ? '#10B98144' : '#F59E0B44'}`,
+                    borderRadius: 20, padding: '6px 14px', fontWeight: 800, fontSize: 12, cursor: 'pointer',
+                    transition: 'all 0.2s'
+                  }}>
+                  <span style={{ width: 8, height: 8, borderRadius: '50%', background: autoMode ? '#10B981' : '#F59E0B', display: 'inline-block' }} />
+                  {autoMode ? '⚡ AUTO' : '🔧 MANUAL'}
+                </button>
               </div>
+
+              {/* Decision reasoning banner — only in AUTO mode */}
+              {autoMode && (
+                <div style={{
+                  background: '#3B82F611', border: '1px solid #3B82F633',
+                  borderRadius: 10, padding: '10px 14px', marginBottom: 14
+                }}>
+                  <div style={{ fontSize: 10, color: '#6b7280', fontWeight: 700, marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                    🤖 Last Auto-Decision
+                  </div>
+                  <div style={{ fontSize: 12, color: '#E5E7EB', lineHeight: 1.5 }}>
+                    <span style={{ color: '#3B82F6', fontWeight: 800 }}>[AUTO→{scheduler}]</span>{' '}
+                    {lastReason || 'Book a ticket to see the auto-selection reasoning'}
+                  </div>
+                </div>
+              )}
+
+              {/* Decision rules table — always visible */}
+              <div style={{ background: '#0a0d1a', border: '1px solid #1f2937', borderRadius: 10, padding: '10px 14px', marginBottom: 14 }}>
+                <div style={{ fontSize: 10, color: '#6b7280', fontWeight: 700, marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.05em' }}>📋 Auto-Selection Rules</div>
+                {[
+                  { trigger: 'Tatkal booking',              algo: 'PRIORITY', color: '#EF4444', reason: 'High-priority process preempts normal queue' },
+                  { trigger: '≥ 3 concurrent bookings',     algo: 'RR',       color: '#10B981', reason: 'Time-sharing prevents convoy effect' },
+                  { trigger: 'Train is 85%+ full',          algo: 'SJF',      color: '#F59E0B', reason: 'Drain shortest jobs on scarce resource' },
+                  { trigger: 'Single-seat booking (1)',     algo: 'SJF',      color: '#F59E0B', reason: 'Shortest burst → min avg waiting time' },
+                  { trigger: 'Group booking (≥ 5 seats)',   algo: 'FCFS',     color: '#6C63FF', reason: 'Arrival order, no long-job penalty' },
+                  { trigger: 'Standard booking (2-4)',      algo: 'FCFS',     color: '#6C63FF', reason: 'Simple, fair, no starvation' },
+                ].map(r => (
+                  <div key={r.trigger} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 0', borderBottom: '1px solid #1a1f2e', fontSize: 11 }}>
+                    <span style={{ color: '#4b5563', fontSize: 10, minWidth: 160 }}>{r.trigger}</span>
+                    <span style={{ background: `${r.color}22`, color: r.color, border: `1px solid ${r.color}44`, borderRadius: 4, padding: '1px 6px', fontWeight: 800, fontSize: 10, minWidth: 60, textAlign: 'center' as const }}>{r.algo}</span>
+                    <span style={{ color: '#4b5563', fontSize: 10 }}>{r.reason}</span>
+                  </div>
+                ))}
+              </div>
+
+              {/* Algorithm cards */}
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
                 {SCHEDULERS.map(sc => {
                   const qSize = getQueueSize(sc.key);
                   const isActive = scheduler === sc.key;
+                  const isAutoSelected = autoMode && isActive;
                   return (
-                    <button key={sc.key} onClick={() => changeScheduler(sc.key)} disabled={schedChanging}
-                      style={{ padding: '16px 14px', border: `1.5px solid ${isActive ? sc.color : '#374151'}`, background: isActive ? `${sc.color}18` : 'rgba(255,255,255,0.02)', borderRadius: 12, cursor: 'pointer', textAlign: 'left' as const, position: 'relative' as const, transition: 'all 0.2s' }}>
-                      {isActive && <span style={{ position: 'absolute' as const, top: 6, right: 8, background: sc.color, color: '#000', fontSize: 9, fontWeight: 800, padding: '1px 5px', borderRadius: 4 }}>ACTIVE</span>}
-                      <div style={{ fontSize: 24, marginBottom: 6 }}>{sc.icon}</div>
-                      <div style={{ fontWeight: 800, fontSize: 14, color: isActive ? sc.color : '#F0F2FF' }}>{sc.label}</div>
-                      <div style={{ fontSize: 10, color: '#6b7280', marginBottom: 4 }}>{sc.ds}</div>
-                      <div style={{ fontSize: 11, color: '#4b5563', marginBottom: 8, lineHeight: 1.4 }}>{sc.desc}</div>
+                    <button key={sc.key}
+                      onClick={() => changeScheduler(sc.key)}
+                      disabled={schedChanging}
+                      title={autoMode ? 'Click to switch to MANUAL and force this algorithm' : ''}
+                      style={{
+                        padding: '14px 12px',
+                        border: `1.5px solid ${isActive ? sc.color : '#374151'}`,
+                        background: isActive ? `${sc.color}18` : 'rgba(255,255,255,0.02)',
+                        borderRadius: 12, cursor: 'pointer', textAlign: 'left' as const,
+                        position: 'relative' as const, transition: 'all 0.2s'
+                      }}>
+                      {/* ACTIVE badge */}
+                      {isActive && (
+                        <span style={{
+                          position: 'absolute' as const, top: 6, right: 8,
+                          background: isAutoSelected ? '#10B981' : sc.color,
+                          color: '#000', fontSize: 9, fontWeight: 800,
+                          padding: '1px 5px', borderRadius: 4
+                        }}>
+                          {isAutoSelected ? '⚡ AUTO' : 'MANUAL'}
+                        </span>
+                      )}
+                      <div style={{ fontSize: 22, marginBottom: 4 }}>{sc.icon}</div>
+                      <div style={{ fontWeight: 800, fontSize: 13, color: isActive ? sc.color : '#F0F2FF' }}>{sc.label}</div>
+                      <div style={{ fontSize: 10, color: '#6b7280', marginBottom: 3 }}>{sc.ds}</div>
+                      <div style={{ fontSize: 10, color: '#4b5563', marginBottom: 6, lineHeight: 1.3 }}>{sc.desc}</div>
+                      {/* Queue depth dots */}
                       <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap' as const, minHeight: 10 }}>
                         {Array.from({ length: Math.min(qSize, 12) }).map((_, j) => (
-                          <div key={j} style={{ width: 8, height: 8, background: sc.color, borderRadius: 2, opacity: 0.7 }} />
+                          <div key={j} style={{ width: 7, height: 7, background: sc.color, borderRadius: 2, opacity: 0.7 }} />
                         ))}
                         {qSize === 0 && <span style={{ fontSize: 9, color: '#4b5563', fontStyle: 'italic' }}>Queue empty</span>}
                       </div>
@@ -400,30 +516,91 @@ const AdminDashboard: React.FC = () => {
 
             {/* Dining Philosophers — full width */}
             <div style={{ gridColumn: '1 / -1', background: '#0f1423', border: '1px solid #1f2937', borderRadius: 16, padding: 22 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 16 }}>
                 <div style={{ borderLeft: '3px solid #8B5CF6', paddingLeft: 12 }}>
-                  <div style={{ fontWeight: 800, fontSize: 15 }}>🍽️ Dining Philosophers — Deadlock Avoidance (Unit II)</div>
-                  <div style={{ fontSize: 12, color: '#6b7280', marginTop: 2 }}>Train crews competing for shared track resources — demonstrates circular-wait prevention via resource hierarchy</div>
+                  <div style={{ fontWeight: 800, fontSize: 15 }}>🍽️ Dining Philosophers — Real Concurrent Booking Contention</div>
+                  <div style={{ fontSize: 12, color: '#6b7280', marginTop: 2 }}>
+                    4 trains = 4 philosophers. Each booking acquires 2 adjacent platform locks before accessing the DB.
+                    Asymmetric rule (Train 3 picks right-first) prevents circular wait. <strong style={{ color: '#10B981' }}>Updates during real concurrent bookings — not a simulation.</strong>
+                  </div>
                 </div>
-                <button onClick={startDining} style={{ background: '#8B5CF622', color: '#8B5CF6', border: '1px solid #8B5CF633', borderRadius: 8, padding: '9px 20px', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>
-                  ▶ Start
-                </button>
+                <div style={{ fontSize: 11, color: '#4b5563', background: '#1a1f2e', border: '1px solid #374151', borderRadius: 8, padding: '8px 14px', textAlign: 'center' as const }}>
+                  <div style={{ fontSize: 9, color: '#6b7280', marginBottom: 2 }}>PROTOCOL</div>
+                  <div style={{ color: '#8B5CF6', fontWeight: 700 }}>Asymmetric Ordering</div>
+                  <div style={{ fontSize: 10, color: '#4b5563', marginTop: 2 }}>Train 0-2: left→right</div>
+                  <div style={{ fontSize: 10, color: '#F59E0B', marginTop: 1 }}>Train 3: right→left ✦</div>
+                </div>
               </div>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5,1fr)', gap: 10 }}>
-                {['0','1','2','3','4'].map(id => {
-                  const state = (metrics.philosophers || {})[id] || 'WAITING';
+
+              {/* 4 Train/Philosopher cards */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12, marginBottom: 16 }}>
+                {['0','1','2','3'].map(id => {
+                  const state   = (metrics.philosophers || {})[id] || 'IDLE';
                   const isEating  = state.includes('EATING');
                   const isHungry  = state.includes('HUNGRY');
-                  const color = isEating ? '#10B981' : isHungry ? '#F59E0B' : '#374151';
-                  const emoji = isEating ? '🚂' : isHungry ? '🤤' : '😴';
+                  const isAsymm   = id === '3';
+                  const color  = isEating ? '#10B981' : isHungry ? '#F59E0B' : '#374151';
+                  const emoji  = isEating ? '🚂' : isHungry ? '🤤' : '😴';
+                  const trains = ['Mumbai Rajdhani', 'Shatabdi Express', 'Duronto Express', 'Garib Rath Exp.'];
+                  const tNum   = ['EXP-12951','EXP-12952','EXP-12953','EXP-12954'];
+                  const left   = parseInt(id);
+                  const right  = (parseInt(id) + 1) % 4;
+                  const lockOrder = isAsymm ? `Lock ${right} → Lock ${left}` : `Lock ${left} → Lock ${right}`;
                   return (
-                    <div key={id} style={{ textAlign: 'center' as const, padding: '16px', background: `${color}11`, border: `1.5px solid ${color}44`, borderRadius: 12 }}>
-                      <div style={{ fontSize: 28, marginBottom: 6 }}>{emoji}</div>
-                      <div style={{ fontWeight: 700, fontSize: 13 }}>Crew {id}</div>
-                      <div style={{ fontSize: 10, color: '#6b7280', marginTop: 3 }}>{state}</div>
+                    <div key={id} style={{ textAlign: 'center' as const, padding: '18px 14px', background: `${color}11`, border: `1.5px solid ${color}44`, borderRadius: 12, position: 'relative' as const }}>
+                      {isAsymm && (
+                        <div style={{ position: 'absolute' as const, top: 8, right: 8, fontSize: 9, background: '#F59E0B22', color: '#F59E0B', border: '1px solid #F59E0B44', borderRadius: 4, padding: '2px 5px', fontWeight: 700 }}>
+                          REVERSED ✦
+                        </div>
+                      )}
+                      <div style={{ fontSize: 30, marginBottom: 6 }}>{emoji}</div>
+                      <div style={{ fontWeight: 800, fontSize: 13, color: '#E5E7EB' }}>Train {id}</div>
+                      <div style={{ fontSize: 10, color: '#6b7280', marginBottom: 8 }}>{trains[parseInt(id)]}</div>
+                      <div style={{ fontSize: 9, color: '#4b5563', fontFamily: 'monospace', marginBottom: 6 }}>{tNum[parseInt(id)]}</div>
+                      <div style={{ display: 'inline-block', background: `${color}22`, color, border: `1px solid ${color}44`, borderRadius: 6, padding: '3px 8px', fontSize: 11, fontWeight: 700, marginBottom: 8 }}>
+                        {isEating ? 'EATING' : isHungry ? 'HUNGRY' : 'THINKING'}
+                      </div>
+                      <div style={{ fontSize: 9, color: '#4b5563' }}>Needs: Lock {left} + Lock {right}</div>
+                      <div style={{ fontSize: 9, color: '#6b7280', marginTop: 2 }}>Order: {lockOrder}</div>
+                      <div style={{ fontSize: 10, color: '#6b7280', marginTop: 6, minHeight: 28, lineHeight: 1.4 }}>{
+                        state === 'IDLE'
+                          ? 'No booking in progress'
+                          : state.split('—')[1]?.trim() || state
+                      }</div>
                     </div>
                   );
                 })}
+              </div>
+
+              {/* Platform Lock Ring */}
+              <div style={{ background: '#0a0d1a', border: '1px solid #1f2937', borderRadius: 10, padding: '14px 18px' }}>
+                <div style={{ fontSize: 11, color: '#6b7280', fontWeight: 700, marginBottom: 10, textTransform: 'uppercase' as const, letterSpacing: '0.05em' }}>
+                  🔗 Platform Lock Ring (Circular Shared Resources)
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 0, justifyContent: 'center', flexWrap: 'wrap' as const }}>
+                  {[0,1,2,3].map(i => {
+                    // A lock is "in use" if any adjacent philosopher is EATING or HUNGRY
+                    const stateL = (metrics.philosophers || {})[String(i)] || 'IDLE';
+                    const stateR = (metrics.philosophers || {})[String((i + 3) % 4)] || 'IDLE';
+                    const locked = stateL.includes('EATING') || stateR.includes('EATING') || stateL.includes('HUNGRY') || stateR.includes('HUNGRY');
+                    const color  = locked ? '#EF4444' : '#10B981';
+                    return (
+                      <React.Fragment key={i}>
+                        <div style={{ textAlign: 'center' as const }}>
+                          <div style={{ fontSize: 18, marginBottom: 2 }}>{locked ? '🔒' : '🔓'}</div>
+                          <div style={{ fontSize: 9, color, fontWeight: 700 }}>Lock {i}</div>
+                          <div style={{ fontSize: 8, color: '#4b5563' }}>T{i}↔T{(i+3)%4}</div>
+                        </div>
+                        {i < 3 && <div style={{ flex: 1, height: 2, background: 'linear-gradient(90deg, #374151, #4b5563)', margin: '0 8px', minWidth: 24, marginBottom: 10 }} />}
+                      </React.Fragment>
+                    );
+                  })}
+                  <div style={{ flex: 1, height: 2, background: 'linear-gradient(90deg, #4b5563, #374151)', margin: '0 8px', minWidth: 24, marginBottom: 10 }} />
+                  <div style={{ fontSize: 9, color: '#4b5563', alignSelf: 'flex-end', marginBottom: 10 }}>↩ (circular)</div>
+                </div>
+                <div style={{ fontSize: 11, color: '#4b5563', textAlign: 'center' as const, marginTop: 4 }}>
+                  Book tickets on different trains <strong style={{ color: '#8B5CF6' }}>simultaneously</strong> to see lock contention live
+                </div>
               </div>
             </div>
           </div>

@@ -44,6 +44,15 @@ public class BookingController {
     @Autowired
     private OsEventLog eventLog;
 
+    @Autowired
+    private TicketBuffer ticketBuffer;
+
+    @Autowired
+    private TrainPlatformLock platformLock;
+
+    @Autowired
+    private SmartSchedulerSelector smartScheduler;
+
     // ─────────────────────────────────────────────────────────────
     // GET /api/trains — Return live seat counts for all trains
     // Wrapped in Readers-Writers protocol so Admin Dashboard shows active readers
@@ -94,15 +103,63 @@ public class BookingController {
         String trainNumber = payload.getOrDefault("trainNumber", "EXP-12951").toString();
         String passengerName = payload.getOrDefault("passengerName", "Passenger").toString();
 
-        String schedulerType = AdminController.getSystemScheduler();
         int pid = userId;
 
-        // ── OS events fired from real booking ──
-        eventLog.pushBooking("New booking request: " + passengerName + " → " + trainNumber + " (" + seatsNeeded + " seats)", pid, true);
-        eventLog.pushScheduler("[" + schedulerType + "] dispatching booking process P" + pid + " (burst=" + seatsNeeded * 10 + "ms)", pid);
+        // ── STEP 1: New booking request logged ──
+        eventLog.pushBooking("New booking request: " + passengerName + " → " + trainNumber + " (" + seatsNeeded + " seat" + (seatsNeeded > 1 ? "s" : ") "), pid, true);
+
+        // ── STEP 2: Producer puts booking request into the TicketBuffer ──
+        try {
+            TicketBuffer.Ticket ticket = new TicketBuffer.Ticket(pid, trainNumber, seatsNeeded);
+            ticketBuffer.produce(ticket);
+            eventLog.push(OsEventLog.TYPE_BOOKING, "Unit-II", "📦 Producer placed booking P" + pid + " into buffer (size=" + ticketBuffer.getBufferSize() + ")", pid, "📦", true);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+
+        // ── STEP 3: Smart / Manual Scheduler Selection ──
+        String schedulerType;
+        String schedulerReason;
+        if (AdminController.isAutoMode()) {
+            SmartSchedulerSelector.Decision decision =
+                smartScheduler.select(seatsNeeded, isTatkal, trainNumber);
+            schedulerType   = decision.algorithm;
+            schedulerReason = decision.reason;
+            AdminController.recordAutoDecision(schedulerType, schedulerReason);
+            eventLog.pushScheduler("[AUTO→" + schedulerType + "] dispatching P" + pid
+                + " (burst=" + seatsNeeded * 10 + "ms) — " + schedulerReason, pid);
+        } else {
+            schedulerType   = AdminController.getSystemScheduler();
+            schedulerReason = "Manual override by admin";
+            eventLog.pushScheduler("[MANUAL→" + schedulerType + "] dispatching P" + pid
+                + " (burst=" + seatsNeeded * 10 + "ms)", pid);
+        }
+
+        // ── STEP 4: Memory allocated for session ──
         eventLog.pushMemory("Allocating session memory for P" + pid + " (booking context ~64KB)", pid);
-        eventLog.pushBanker("Banker's check: P" + pid + " requesting " + seatsNeeded + " " + trainNumber + " seats — running safety algo", pid, true);
+
+        // ── STEP 5: Banker's Algorithm safety check ──
+        eventLog.pushBanker("Banker’s check: P" + pid + " requesting " + seatsNeeded + " " + trainNumber + " seats — running safety algo", pid, true);
+
+        // ── STEP 6: Mutex lock acquired (critical section) ──
         eventLog.pushMutex("P" + pid + " acquiring mutex lock on seat table (critical section)", pid, true);
+
+        // ── STEP 6b: Dining Philosophers — acquire both platform locks ──
+        // This is the real Dining Philosophers implementation:
+        // train i must acquire platformLock[i] AND platformLock[(i+1)%N]
+        // Asymmetric rule on last train prevents circular wait / deadlock.
+        int trainIndex = platformLock.getTrainIndex(trainNumber);
+        if (trainIndex >= 0) {
+            platformLock.acquirePlatformLocks(trainIndex, pid, eventLog);
+        }
+
+        // ── STEP 7: Consumer removes from buffer when the scheduler picks it up ──
+        try {
+            ticketBuffer.consume();
+            eventLog.push(OsEventLog.TYPE_BOOKING, "Unit-II", "✅ Consumer dequeued booking P" + pid + " from buffer (size=" + ticketBuffer.getBufferSize() + ")", pid, "✅", true);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
 
         // MEMBER 1: Create process with PCB
         BookingProcess process = new BookingProcess(userId, seatsNeeded, isTatkal,
@@ -132,7 +189,6 @@ public class BookingController {
             CriticalSectionGuard.BookingResult result = process.getResult();
             Map<String, Object> response = new HashMap<>();
             if (result != null && result.success && result.booking != null) {
-                // Post-booking OS events
                 eventLog.pushMutex("P" + pid + " releasing mutex lock — seat table updated", pid, false);
                 eventLog.pushFileIO("Writing booking record " + result.booking.getPnr() + " to disk (INDEXED file org)", pid, true);
                 eventLog.pushTLB("TLB hit: booking page for P" + pid + " → physical frame 0x" + Integer.toHexString(pid % 256), pid, true);
@@ -163,6 +219,15 @@ public class BookingController {
             Thread.currentThread().interrupt();
             eventLog.pushBooking("⚠️ Booking INTERRUPTED for P" + pid, pid, false);
             return Map.of("success", false, "message", "Booking interrupted.");
+        } finally {
+            // ── ALWAYS release Dining Philosophers platform locks, even on failure/interruption ──
+            if (trainIndex >= 0) {
+                try {
+                    platformLock.releasePlatformLocks(trainIndex, pid, eventLog);
+                } catch (IllegalMonitorStateException ignore) {
+                    // Lock was already released or was never fully acquired
+                }
+            }
         }
     }
 
@@ -219,14 +284,14 @@ public class BookingController {
         int ticketsToGenerate  = Integer.parseInt(payload.getOrDefault("ticketsToGenerate", "20").toString());
         int numConsumers       = Integer.parseInt(payload.getOrDefault("numConsumers", "3").toString());
 
-        TicketBuffer buffer = new TicketBuffer(tracker);
+        // Use the shared Spring bean so the admin dashboard buffer count is visible
         TicketProducer producer = new TicketProducer();
-        producer.initialize(buffer, trainNumber, ticketsToGenerate);
+        producer.initialize(ticketBuffer, trainNumber, ticketsToGenerate);
         producer.start();
 
         for (int i = 1; i <= numConsumers; i++) {
             TicketConsumer consumer = new TicketConsumer();
-            consumer.initialize(buffer, i, ticketsToGenerate / numConsumers);
+            consumer.initialize(ticketBuffer, i, ticketsToGenerate / numConsumers);
             consumer.start();
         }
 

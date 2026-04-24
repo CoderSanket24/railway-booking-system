@@ -1,5 +1,6 @@
 package com.vit.railway_os.oscore;
 
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 import java.util.concurrent.Semaphore;
 
@@ -14,6 +15,12 @@ public class AvailabilityMonitor {
     // writeLock protects the actual seat data from being read while it's being updated
     private final Semaphore writeLock = new Semaphore(1);
 
+    @Autowired
+    private OsStateTracker tracker;
+
+    @Autowired
+    private OsEventLog eventLog;
+
     /**
      * OS CONCEPT: Reader Entry Protocol — call BEFORE reading shared data.
      * Multiple threads may be active simultaneously between startRead / endRead.
@@ -22,11 +29,12 @@ public class AvailabilityMonitor {
         try {
             readMutex.acquire();           // P(readMutex) — lock the counter
             readersCount++;
+            tracker.setActiveReaders(readersCount);   // ← push live count to tracker
             if (readersCount == 1) {
                 writeLock.acquire();       // 1st reader locks out all writers
-                System.out.println("[READER ENTRY] User " + userId +
-                        " acquired read access. Active Readers: " + readersCount);
             }
+            System.out.println("[READER ENTRY] User " + userId +
+                    " acquired read access. Active Readers: " + readersCount);
             readMutex.release();           // V(readMutex) — allow more readers in
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
@@ -40,11 +48,12 @@ public class AvailabilityMonitor {
         try {
             readMutex.acquire();           // P(readMutex)
             readersCount--;
+            tracker.setActiveReaders(readersCount);   // ← push live count to tracker
             if (readersCount == 0) {
                 writeLock.release();       // Last reader unblocks writers
-                System.out.println("[READER EXIT] User " + userId +
-                        " released read access. Active Readers: " + readersCount);
             }
+            System.out.println("[READER EXIT] User " + userId +
+                    " released read access. Active Readers: " + readersCount);
             readMutex.release();           // V(readMutex)
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();

@@ -21,7 +21,10 @@ public class OsStateTracker {
     // 3. Producer/Consumer State
     private final AtomicInteger ticketsInBuffer = new AtomicInteger(0);
 
-    // 4. Dining Philosophers State
+    // 4. Active Readers (Readers-Writers)
+    private final AtomicInteger activeReaders = new AtomicInteger(0);
+
+    // 5. Dining Philosophers State
     private final Map<Integer, String> philosopherStates = new ConcurrentHashMap<>();
 
     // --- Process State Methods ---
@@ -64,6 +67,15 @@ public class OsStateTracker {
 
     public int getTicketsInBuffer() {
         return ticketsInBuffer.get();
+    }
+
+    // --- Active Readers Methods ---
+    public void setActiveReaders(int count) {
+        this.activeReaders.set(Math.max(0, count));
+    }
+
+    public int getActiveReaders() {
+        return activeReaders.get();
     }
 
     // --- Dining Philosophers State Methods ---

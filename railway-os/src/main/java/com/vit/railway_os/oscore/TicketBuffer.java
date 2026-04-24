@@ -1,28 +1,32 @@
 package com.vit.railway_os.oscore;
 
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Component;
 import java.util.LinkedList;
 import java.util.Queue;
 import java.util.concurrent.Semaphore;
 
 /**
  * MEMBER 5: Producer-Consumer Problem
- * Bounded Buffer for ticket generation and booking
+ * Bounded Buffer for ticket generation and booking.
+ * Now a Spring @Component so it can be shared across all booking requests.
  */
+@Component
 public class TicketBuffer {
     
     private static final int BUFFER_SIZE = 10;
-    private Queue<Ticket> buffer = new LinkedList<>();
-    
+    private final Queue<Ticket> buffer = new LinkedList<>();
+
     // Semaphores for synchronization
-    private Semaphore empty = new Semaphore(BUFFER_SIZE); // Count empty slots
-    private Semaphore full = new Semaphore(0);            // Count filled slots
-    private Semaphore mutex = new Semaphore(1);           // Mutual exclusion
-    
+    private final Semaphore empty = new Semaphore(BUFFER_SIZE); // Count empty slots
+    private final Semaphore full  = new Semaphore(0);           // Count filled slots
+    private final Semaphore mutex = new Semaphore(1);           // Mutual exclusion
+
+    @Autowired
     private OsStateTracker tracker;
-    
-    public TicketBuffer(OsStateTracker tracker) {
-        this.tracker = tracker;
-    }
+
+    // No-arg constructor required by Spring
+    public TicketBuffer() {}
     
     /**
      * Producer: Generate tickets and add to buffer

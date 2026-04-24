@@ -1,6 +1,5 @@
 package com.vit.railway_os.oscore;
 
-import org.springframework.stereotype.Component;
 import java.util.concurrent.Semaphore;
 
 /**

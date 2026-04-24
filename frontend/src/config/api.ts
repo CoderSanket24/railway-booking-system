@@ -17,7 +17,9 @@ export const API_ENDPOINTS = {
     // Admin – Units I-III
     ADMIN_MONITOR:              `${API_BASE_URL}/api/admin/monitor`,
     ADMIN_SCHEDULER:            `${API_BASE_URL}/api/admin/scheduler`,
-    START_DINING_PHILOSOPHERS:  `${API_BASE_URL}/api/admin/start-dining-philosophers`,
+    ADMIN_SCHEDULER_AUTO:       `${API_BASE_URL}/api/admin/scheduler/auto`,
+    START_DINING_PHILOSOPHERS:  `${API_BASE_URL}/api/admin/start-dining-philosophers`, // kept for backward compat
+    ADMIN_PHILOSOPHERS:         `${API_BASE_URL}/api/admin/philosophers`,
     LIVE_EVENTS:                `${API_BASE_URL}/api/admin/live-events`,
     LIVE_EVENTS_CLEAR:          `${API_BASE_URL}/api/admin/live-events/clear`,
 

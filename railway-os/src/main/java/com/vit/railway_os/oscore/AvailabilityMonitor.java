@@ -18,9 +18,6 @@ public class AvailabilityMonitor {
     @Autowired
     private OsStateTracker tracker;
 
-    @Autowired
-    private OsEventLog eventLog;
-
     /**
      * OS CONCEPT: Reader Entry Protocol — call BEFORE reading shared data.
      * Multiple threads may be active simultaneously between startRead / endRead.

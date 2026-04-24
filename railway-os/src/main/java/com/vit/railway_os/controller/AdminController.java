@@ -16,7 +16,6 @@ public class AdminController {
     @Autowired private SJFScheduler sjfScheduler;
     @Autowired private RoundRobinScheduler roundRobinScheduler;
     @Autowired private PriorityScheduler priorityScheduler;
-    @Autowired private AvailabilityMonitor availabilityMonitor;
     @Autowired private OsStateTracker tracker;
     @Autowired private TrainPlatformLock trainPlatformLock;  // Real Dining Philosophers (no simulation)
 
@@ -38,7 +37,7 @@ public class AdminController {
 
     // ── Real-time OS Event Log ─────────────────────────────────────────────────
     @Autowired private OsEventLog osEventLog;
-    @Autowired private SmartSchedulerSelector smartScheduler;
+
 
     private static String  currentScheduler  = "FCFS";
     private static boolean autoMode          = true;   // AUTO on by default

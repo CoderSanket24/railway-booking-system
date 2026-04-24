@@ -29,7 +29,8 @@ public class AvailabilityMonitor {
         try {
             readMutex.acquire();           // P(readMutex) — lock the counter
             readersCount++;
-            tracker.setActiveReaders(readersCount);   // ← push live count to tracker
+            tracker.incrementTotalReaderSessions();        // ← cumulative: never decrements
+            tracker.setActiveReaders(readersCount);        // ← real-time: resets to 0 on exit
             if (readersCount == 1) {
                 writeLock.acquire();       // 1st reader locks out all writers
             }

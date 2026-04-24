@@ -50,16 +50,17 @@ public class AdminController {
     @GetMapping("/monitor")
     public Map<String, Object> getOsMetrics() {
         Map<String, Object> metrics = new HashMap<>();
-        metrics.put("fcfsQueueSize",       fcfsScheduler.getQueueSize());
-        metrics.put("sjfQueueSize",        sjfScheduler.getQueueSize());
-        metrics.put("roundRobinQueueSize", roundRobinScheduler.getQueueSize());
-        metrics.put("priorityQueueSize",   priorityScheduler.getQueueSize());
-        metrics.put("activeReaders",       tracker.getActiveReaders());
-        metrics.put("recentProcesses",     tracker.getRecentProcesses());
-        metrics.put("mutexState",          tracker.getMutexState());
-        metrics.put("ticketsInBuffer",     tracker.getTicketsInBuffer());
-        // Philosopher states come from TrainPlatformLock — updated by real bookings
-        metrics.put("philosophers",        trainPlatformLock.getPhilosopherStates());
+        metrics.put("fcfsQueueSize",          fcfsScheduler.getQueueSize());
+        metrics.put("sjfQueueSize",           sjfScheduler.getQueueSize());
+        metrics.put("roundRobinQueueSize",    roundRobinScheduler.getQueueSize());
+        metrics.put("priorityQueueSize",      priorityScheduler.getQueueSize());
+        metrics.put("activeReaders",          tracker.getActiveReaders());
+        metrics.put("totalReaderSessions",    tracker.getTotalReaderSessions());   // cumulative
+        metrics.put("peakConcurrentReaders",  tracker.getPeakConcurrentReaders()); // high-water mark
+        metrics.put("recentProcesses",        tracker.getRecentProcesses());
+        metrics.put("mutexState",             tracker.getMutexState());
+        metrics.put("ticketsInBuffer",        tracker.getTicketsInBuffer());
+        metrics.put("philosophers",           trainPlatformLock.getPhilosopherStates());
         return metrics;
     }
 

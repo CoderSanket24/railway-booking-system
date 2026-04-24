@@ -1,7 +1,17 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import axios from 'axios';
 import { API_ENDPOINTS } from '../config/api';
+
+const useIsMobile = () => {
+    const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
+    useEffect(() => {
+        const handler = () => setIsMobile(window.innerWidth < 768);
+        window.addEventListener('resize', handler);
+        return () => window.removeEventListener('resize', handler);
+    }, []);
+    return isMobile;
+};
 
 const Register: React.FC = () => {
     const [username, setUsername] = useState<string>('');
@@ -13,6 +23,7 @@ const Register: React.FC = () => {
     const [success, setSuccess] = useState<string>('');
     const [loading, setLoading] = useState<boolean>(false);
     const navigate = useNavigate();
+    const isMobile = useIsMobile();
 
     const passwordStrength = () => {
         if (password.length === 0) return { score: 0, label: '', color: '' };
@@ -52,13 +63,15 @@ const Register: React.FC = () => {
             <div style={S.blob1} />
             <div style={S.blob2} />
 
-            <div style={S.container} className="fade-up">
+            <div style={{ ...S.container, flexDirection: isMobile ? 'column' : 'row', maxWidth: isMobile ? '100%' : 820, borderRadius: isMobile ? 0 : 28, minHeight: isMobile ? '100vh' : 'auto', margin: isMobile ? 0 : undefined }} className="fade-up">
                 {/* Left info panel */}
-                <div style={S.leftPanel}>
+                <div style={{ ...S.leftPanel, flex: isMobile ? 'none' : '0 0 300px', padding: isMobile ? '28px 20px 20px' : '50px 40px', flexDirection: isMobile ? 'row' : 'column' as const, alignItems: isMobile ? 'center' : 'stretch', gap: isMobile ? 16 : 28 }}>
                     <div style={S.logoRow}>
                         <div style={S.logoBox}>🚄</div>
                         <span style={S.logoText}>RailBooker</span>
                     </div>
+                    {!isMobile && (
+                    <>
                     <h2 style={S.infoTitle}>Join the platform</h2>
                     <p style={S.infoSub}>
                         Create your account to book train tickets instantly with our OS-powered scheduling system.
@@ -75,13 +88,25 @@ const Register: React.FC = () => {
                             </div>
                         ))}
                     </div>
+                    </>
+                    )}
+                    {isMobile && (
+                        <div style={{ display: 'flex', gap: 12, marginLeft: 'auto' }}>
+                            {['100+\nSeats', '4\nAlgorithms', '∞\nBookings'].map(s => (
+                                <div key={s} style={{ textAlign: 'center' as const, padding: '8px 12px', background: 'rgba(255,255,255,0.04)', borderRadius: 10, minWidth: 60 }}>
+                                    <div style={{ fontSize: 14, fontWeight: 900, color: '#8B84FF' }}>{s.split('\n')[0]}</div>
+                                    <div style={{ fontSize: 9, color: '#9BA3BF', marginTop: 2 }}>{s.split('\n')[1]}</div>
+                                </div>
+                            ))}
+                        </div>
+                    )}
                 </div>
 
                 {/* Divider */}
-                <div style={S.verticalDivider} />
+                {!isMobile && <div style={S.verticalDivider} />}
 
                 {/* Right form */}
-                <div style={S.rightPanel}>
+                <div style={{ ...S.rightPanel, padding: isMobile ? '24px 20px 40px' : '50px 44px' }}>
                     <h2 style={S.formTitle}>Create Account</h2>
                     <p style={S.formSub}>Fill in the details to get started</p>
 
@@ -239,7 +264,7 @@ const S: Record<string, React.CSSProperties> = {
         minHeight: '100vh',
         background: 'linear-gradient(135deg, #0D0F1A 0%, #12141F 100%)',
         display: 'flex', alignItems: 'center', justifyContent: 'center',
-        padding: 24, position: 'relative', overflow: 'hidden',
+        padding: 0, position: 'relative', overflow: 'hidden',
     },
     blob1: {
         position: 'fixed' as const, top: -150, left: -100,

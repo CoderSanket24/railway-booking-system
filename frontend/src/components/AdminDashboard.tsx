@@ -12,6 +12,8 @@ interface OsMetrics {
   fcfsQueueSize: number; sjfQueueSize: number;
   roundRobinQueueSize: number; priorityQueueSize: number;
   activeReaders: number;
+  totalReaderSessions?: number;
+  peakConcurrentReaders?: number;
   mutexState?: { isLocked: boolean; lockedByPid: number | null };
   ticketsInBuffer?: number;
   recentProcesses?: { pid: number; type: string; newState: string }[];
@@ -78,7 +80,8 @@ const EventRow: React.FC<{ ev: OsEvent; isNew: boolean; stepNum?: number }> = ({
 const AdminDashboard: React.FC = () => {
   const navigate = useNavigate();
   const [metrics, setMetrics] = useState<OsMetrics>({
-    fcfsQueueSize: 0, sjfQueueSize: 0, roundRobinQueueSize: 0, priorityQueueSize: 0, activeReaders: 0,
+    fcfsQueueSize: 0, sjfQueueSize: 0, roundRobinQueueSize: 0, priorityQueueSize: 0,
+    activeReaders: 0, totalReaderSessions: 0, peakConcurrentReaders: 0,
   });
   const [events, setEvents] = useState<OsEvent[]>([]);
   const [newIds, setNewIds]  = useState<Set<number>>(new Set());
@@ -244,7 +247,7 @@ const AdminDashboard: React.FC = () => {
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6,1fr)', gap: 10, marginBottom: 20 }}>
           <StatPill label="Active Scheduler" value={scheduler}                          color="#6C63FF" icon="⚙️" />
           <StatPill label="Queue Depth"       value={totalQ}                             color="#3B82F6" icon="📋" />
-          <StatPill label="Active Readers"    value={metrics.activeReaders}              color="#10B981" icon="👓" />
+          <StatPill label="Reader Sessions"   value={metrics.totalReaderSessions ?? 0}     color="#10B981" icon="👓" />
           <StatPill label="Mutex"             value={mx.isLocked ? `LOCKED P${mx.lockedByPid}` : 'OPEN'} color={mx.isLocked ? '#EF4444' : '#10B981'} icon={mx.isLocked ? '🔒' : '🔓'} />
           <StatPill label="Buffer Items"      value={metrics.ticketsInBuffer ?? 0}       color="#F59E0B" icon="📦" />
           <StatPill label="OS Events"         value={events.length}                      color="#8B5CF6" icon="📡" />
@@ -494,8 +497,9 @@ const AdminDashboard: React.FC = () => {
                   },
                   {
                     label: 'Readers-Writers — Train Availability',
-                    sub: 'Multiple users can read concurrently; bookings wait for exclusive write',
-                    big: `${metrics.activeReaders} concurrent reader${metrics.activeReaders !== 1 ? 's' : ''}`,
+                    sub: 'Multiple users can read concurrently; bookings wait for exclusive write lock',
+                    big: `${metrics.totalReaderSessions ?? 0} total reader session${(metrics.totalReaderSessions ?? 0) !== 1 ? 's' : ''}`,
+                    extra: `Peak concurrent: ${metrics.peakConcurrentReaders ?? 0}  ·  Active now: ${metrics.activeReaders} (resets <5ms — see live feed)`,
                     color: '#3B82F6',
                   },
                   {
@@ -504,11 +508,12 @@ const AdminDashboard: React.FC = () => {
                     big: `${metrics.ticketsInBuffer ?? 0} items in buffer`,
                     color: '#F59E0B',
                   },
-                ].map(item => (
+                ].map((item: any) => (
                   <div key={item.label} style={{ padding: '14px 16px', background: `${item.color}08`, border: `1px solid ${item.color}22`, borderRadius: 10, marginBottom: 10 }}>
                     <div style={{ fontSize: 11, color: '#6b7280', marginBottom: 4 }}>{item.label}</div>
                     <div style={{ fontSize: 10, color: '#4b5563', marginBottom: 6 }}>{item.sub}</div>
                     <div style={{ fontSize: 15, fontWeight: 800, color: item.color }}>{item.big}</div>
+                    {item.extra && <div style={{ fontSize: 10, color: '#6b7280', marginTop: 5, fontFamily: 'monospace' }}>{item.extra}</div>}
                   </div>
                 ))}
               </div>

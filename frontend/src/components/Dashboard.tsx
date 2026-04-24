@@ -3,6 +3,16 @@ import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import { API_ENDPOINTS } from '../config/api';
 
+const useIsMobile = () => {
+    const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
+    useEffect(() => {
+        const handler = () => setIsMobile(window.innerWidth < 768);
+        window.addEventListener('resize', handler);
+        return () => window.removeEventListener('resize', handler);
+    }, []);
+    return isMobile;
+};
+
 interface Train {
     trainNumber: string; trainName: string; from: string; to: string;
     departure: string; arrival: string; duration: string;
@@ -47,6 +57,7 @@ const Dashboard: React.FC = () => {
     const navigate = useNavigate();
     const username = localStorage.getItem('username') || 'Passenger';
     const userId   = getSessionUserId();
+    const isMobile = useIsMobile();
 
     const [trains, setTrains]               = useState<Train[]>(FALLBACK_TRAINS);
     const [searchFrom, setSearchFrom]       = useState('');
@@ -163,67 +174,80 @@ const Dashboard: React.FC = () => {
 
     return (
         <div style={S.page}>
+            {/* Animated background orbs */}
+            <div className="page-bg">
+                <div className="orb orb-1" />
+                <div className="orb orb-2" />
+                <div className="orb orb-3" />
+            </div>
             {/* Navbar */}
-            <nav style={S.navbar}>
+            <nav style={{ ...S.navbar, padding: isMobile ? '0 16px' : undefined }} className="frosted-nav">
                 <div style={S.navLeft}>
                     <div style={S.navLogo}>🚄</div>
-                    <div>
-                        <div style={S.navBrand}>RailBooker</div>
-                        <div style={S.navTagline}>Railway OS System</div>
-                    </div>
+                    {!isMobile && (
+                        <div>
+                            <div style={S.navBrand}>RailBooker</div>
+                            <div style={S.navTagline}>Railway OS System</div>
+                        </div>
+                    )}
                 </div>
                 <div style={S.navCenter}>
                     {(['search', 'bookings'] as const).map(tab => (
-                        <button
-                            key={tab}
-                            onClick={() => { setActiveTab(tab); setBookingSuccess(false); }}
-                            style={{ ...S.navTab, ...(activeTab === tab ? S.navTabActive : {}) }}
-                        >
-                            {tab === 'search' ? '🔍 Find Trains' : `📋 My Bookings${bookingHistory.length ? ` (${bookingHistory.length})` : ''}`}
+                        <button key={tab} onClick={() => { setActiveTab(tab); setBookingSuccess(false); }}
+                            style={{ ...S.navTab, ...(activeTab === tab ? S.navTabActive : {}), fontSize: isMobile ? 12 : 14, padding: isMobile ? '8px 12px' : '8px 18px' }}>
+                            {tab === 'search' ? '🔍 Trains' : `📋 Bookings${bookingHistory.length ? ` (${bookingHistory.length})` : ''}`}
                         </button>
                     ))}
                 </div>
                 <div style={S.navRight}>
-                    <div style={S.userPill}>
-                        <span style={S.userAvatar}>{username[0].toUpperCase()}</span>
-                        <span style={S.userName}>{username}</span>
-                    </div>
-                    <button onClick={handleLogout} className="btn-danger" style={{ fontSize: 13 }}>Sign Out</button>
+                    {!isMobile && (
+                        <div style={S.userPill}>
+                            <span style={S.userAvatar}>{username[0].toUpperCase()}</span>
+                            <span style={S.userName}>{username}</span>
+                        </div>
+                    )}
+                    <button onClick={handleLogout} className="btn-danger" style={{ fontSize: 13, padding: isMobile ? '8px 12px' : undefined }}>
+                        {isMobile ? '⏻' : 'Sign Out'}
+                    </button>
                 </div>
             </nav>
 
-            <div style={S.main}>
+            <div style={{ ...S.main, padding: isMobile ? '20px 16px' : '40px 24px' }}>
 
                 {/* ===== SEARCH TAB ===== */}
                 {activeTab === 'search' && (
                     <div style={{ animation: 'fadeUp 0.4s ease-out' }}>
                         {/* Hero search bar */}
-                        <div style={S.searchHero}>
+                        <div style={{ ...S.searchHero, padding: isMobile ? '28px 20px' : '48px 40px' }}>
                             <div style={S.heroGlow} />
-                            <h1 style={S.heroTitle}>Where are you travelling?</h1>
-                            <p style={S.heroSub}>Search from {trains.length} trains across India {trainsLoaded && <span style={{ color: '#10B981', fontSize: 12 }}>● Live</span>}</p>
-                            <div style={S.searchBar}>
-                                <div style={S.searchField}>
+                            <h1 style={{ ...S.heroTitle, fontSize: isMobile ? 22 : undefined }}>Where are you travelling?</h1>
+                            <p style={{ ...S.heroSub, fontSize: isMobile ? 13 : 15, marginBottom: isMobile ? 20 : 32 }}>Search from {trains.length} trains across India {trainsLoaded && <span style={{ color: '#10B981', fontSize: 12 }}>● Live</span>}</p>
+                            <div style={{ ...S.searchBar, flexDirection: isMobile ? 'column' : 'row' as const, gap: isMobile ? 0 : undefined }}>
+                                <div style={{ ...S.searchField, borderBottom: isMobile ? '1px solid rgba(255,255,255,0.07)' : 'none' }}>
                                     <span style={S.searchIcon}>📍</span>
                                     <input style={S.searchInput} placeholder="From (e.g. Mumbai)" value={searchFrom}
                                         onChange={e => setSearchFrom(e.target.value)} id="search-from" />
                                 </div>
-                                <div style={S.searchDivider}>
-                                    <div style={S.dividerLine} />
-                                    <div style={S.swapIcon}>⇄</div>
-                                    <div style={S.dividerLine} />
-                                </div>
-                                <div style={S.searchField}>
+                                {!isMobile && (
+                                    <div style={S.searchDivider}>
+                                        <div style={S.dividerLine} />
+                                        <div style={S.swapIcon}>⇄</div>
+                                        <div style={S.dividerLine} />
+                                    </div>
+                                )}
+                                <div style={{ ...S.searchField, borderBottom: isMobile ? '1px solid rgba(255,255,255,0.07)' : 'none' }}>
                                     <span style={S.searchIcon}>🏁</span>
                                     <input style={S.searchInput} placeholder="To (e.g. Delhi)" value={searchTo}
                                         onChange={e => setSearchTo(e.target.value)} id="search-to" />
                                 </div>
-                                <div style={S.searchField}>
-                                    <span style={S.searchIcon}>📅</span>
-                                    <input style={{ ...S.searchInput, colorScheme: 'dark' }} type="date" value={searchDate}
-                                        onChange={e => setSearchDate(e.target.value)} id="search-date" />
-                                </div>
-                                <button className="btn-accent" style={{ padding: '0 32px', borderRadius: 14, fontSize: 15, fontWeight: 700 }}>Search</button>
+                                {!isMobile && (
+                                    <div style={S.searchField}>
+                                        <span style={S.searchIcon}>📅</span>
+                                        <input style={{ ...S.searchInput, colorScheme: 'dark' }} type="date" value={searchDate}
+                                            onChange={e => setSearchDate(e.target.value)} id="search-date" />
+                                    </div>
+                                )}
+                                <button className="btn-accent" style={{ padding: isMobile ? '14px' : '0 32px', borderRadius: isMobile ? 12 : 14, fontSize: 15, fontWeight: 700, margin: isMobile ? '6px' : undefined }}>Search</button>
                             </div>
                         </div>
 
@@ -234,8 +258,12 @@ const Dashboard: React.FC = () => {
                         </div>
 
                         <div style={S.trainGrid}>
-                            {filteredTrains.map(train => (
-                                <div key={train.trainNumber} style={S.trainCard} className="card card-hover">
+                            {filteredTrains.map((train, idx) => {
+                                const seatPct = Math.min(100, Math.round((train.availableSeats / 120) * 100));
+                                const barClass = seatPct > 60 ? 'high' : seatPct > 25 ? 'medium' : 'low';
+                                return (
+                                <div key={train.trainNumber} className="train-card"
+                                    style={{ animationDelay: `${idx * 0.07}s`, animation: 'fadeUp 0.5s ease-out both' }}>
                                     {/* Card header */}
                                     <div style={S.tcHeader}>
                                         <div style={S.tcHeaderLeft}>
@@ -278,10 +306,17 @@ const Dashboard: React.FC = () => {
                                     {/* Footer */}
                                     <div style={S.tcFooter}>
                                         <div style={S.tcSeats}>
-                                            <span style={{ ...S.seatDot, background: getSeatsColor(train.availableSeats) }} />
-                                            <span style={{ color: getSeatsColor(train.availableSeats), fontSize: 13, fontWeight: 600 }}>
-                                                {train.availableSeats} seats available
-                                            </span>
+                                            <div>
+                                                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                                    <span style={{ ...S.seatDot, background: getSeatsColor(train.availableSeats) }} />
+                                                    <span style={{ color: getSeatsColor(train.availableSeats), fontSize: 13, fontWeight: 600 }}>
+                                                        {train.availableSeats} seats
+                                                    </span>
+                                                </div>
+                                                <div className="seat-bar-track" style={{ width: 120 }}>
+                                                    <div className={`seat-bar-fill ${barClass}`} style={{ width: `${seatPct}%` }} />
+                                                </div>
+                                            </div>
                                         </div>
                                         <button
                                             className="btn-primary"
@@ -294,7 +329,8 @@ const Dashboard: React.FC = () => {
                                         </button>
                                     </div>
                                 </div>
-                            ))}
+                                );
+                            })}
                         </div>
                     </div>
                 )}
@@ -357,8 +393,8 @@ const Dashboard: React.FC = () => {
 
             {/* ===== BOOKING MODAL ===== */}
             {showModal && selectedTrain && (
-                <div style={S.overlay} onClick={e => { if (e.target === e.currentTarget) setShowModal(false); }}>
-                    <div style={S.modal} className="fade-up">
+                <div className="modal-overlay" onClick={e => { if (e.target === e.currentTarget) setShowModal(false); }}>
+                    <div className="modal-box" style={isMobile ? { borderRadius: '20px 20px 0 0', position: 'fixed', bottom: 0, left: 0, right: 0, maxWidth: '100%', maxHeight: '90vh', overflowY: 'auto', padding: '28px 20px 40px' } : { maxHeight: '90vh', overflowY: 'auto' as const }}>
                         {/* Modal header */}
                         <div style={S.modalHeader}>
                             <div>
@@ -572,8 +608,8 @@ const S: Record<string, React.CSSProperties> = {
     emptyTitle: { fontSize: 22, fontWeight: 700, color: '#F0F2FF', marginBottom: 10 },
     emptySub: { fontSize: 15, color: '#9BA3BF' },
     bookingsList: { display: 'flex', flexDirection: 'column' as const, gap: 16 },
-    bookingCard: { display: 'flex', gap: 24, padding: '24px 28px', alignItems: 'center', background: '#181A28', border: '1px solid rgba(255,255,255,0.07)', borderRadius: 18 },
-    bookingCardLeft: { textAlign: 'center' as const, flexShrink: 0, padding: '16px 24px 16px 0', borderRight: '1px solid rgba(255,255,255,0.07)' },
+    bookingCard: { display: 'flex', gap: 16, padding: '20px', alignItems: 'flex-start', background: '#181A28', border: '1px solid rgba(255,255,255,0.07)', borderRadius: 18, flexWrap: 'wrap' as const },
+    bookingCardLeft: { textAlign: 'center' as const, flexShrink: 0, padding: '12px 16px 12px 0', borderRight: '1px solid rgba(255,255,255,0.07)' },
     pnrLabel: { fontSize: 10, color: '#5C6480', fontWeight: 700, letterSpacing: '0.1em', marginBottom: 4 },
     pnrValue: { fontSize: 14, fontWeight: 800, color: '#8B84FF', fontFamily: 'monospace', marginBottom: 6 },
     bookingDate: { fontSize: 11, color: '#9BA3BF' },

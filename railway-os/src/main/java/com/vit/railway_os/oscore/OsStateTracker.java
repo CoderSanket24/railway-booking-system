@@ -22,7 +22,9 @@ public class OsStateTracker {
     private final AtomicInteger ticketsInBuffer = new AtomicInteger(0);
 
     // 4. Active Readers (Readers-Writers)
-    private final AtomicInteger activeReaders = new AtomicInteger(0);
+    private final AtomicInteger activeReaders      = new AtomicInteger(0);
+    private final AtomicInteger totalReaderSessions = new AtomicInteger(0); // cumulative
+    private final AtomicInteger peakConcurrentReaders = new AtomicInteger(0);
 
     // 5. Dining Philosophers State
     private final Map<Integer, String> philosopherStates = new ConcurrentHashMap<>();
@@ -71,12 +73,21 @@ public class OsStateTracker {
 
     // --- Active Readers Methods ---
     public void setActiveReaders(int count) {
-        this.activeReaders.set(Math.max(0, count));
+        int c = Math.max(0, count);
+        this.activeReaders.set(c);
+        // Track peak concurrent readers
+        peakConcurrentReaders.updateAndGet(prev -> Math.max(prev, c));
+        // Count every new reader entry (count going up = new session)
+        // The caller must call incrementTotalReaderSessions() on entry
     }
 
-    public int getActiveReaders() {
-        return activeReaders.get();
+    public void incrementTotalReaderSessions() {
+        totalReaderSessions.incrementAndGet();
     }
+
+    public int getActiveReaders()        { return activeReaders.get(); }
+    public int getTotalReaderSessions()  { return totalReaderSessions.get(); }
+    public int getPeakConcurrentReaders(){ return peakConcurrentReaders.get(); }
 
     // --- Dining Philosophers State Methods ---
     public void updatePhilosopherState(int philId, String state) {

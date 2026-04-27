@@ -1,5 +1,6 @@
 // API Configuration — uses the same hostname as the browser so LAN/IP access works
-const API_BASE_URL = `http://${window.location.hostname}:8080`;
+// const API_BASE_URL = `http://${window.location.hostname}:8080`;
+const API_BASE_URL = `https://railway-booking-system-otpp.onrender.com`;
 
 export const API_ENDPOINTS = {
     // Auth

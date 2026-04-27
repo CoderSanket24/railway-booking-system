@@ -187,10 +187,10 @@ const AdminDashboard: React.FC = () => {
   const tlbHits    = events.filter(e => e.type === 'TLB' && e.detail.includes('hit')).length;
   const tlbHitRate = tlbTotal > 0 ? Math.round((tlbHits / tlbTotal) * 100) : 0;
   const mutexLocks = events.filter(e => e.type === 'MUTEX' && e.detail.includes('acquiring')).length;
-  const bookings   = countOf('BOOKING');
+  const attempted  = events.filter(e => e.type === 'BOOKING' && e.detail.includes('New booking request')).length;
   const confirmed  = events.filter(e => e.type === 'BOOKING' && e.detail.includes('CONFIRMED')).length;
   const fileWrites = events.filter(e => e.type === 'FILE_IO' && e.detail.includes('Writing')).length;
-  const memAllocs  = events.filter(e => e.type === 'MEMORY' && e.detail.includes('Allocating')).length;
+  const memAllocs  = events.filter(e => e.type === 'MEMORY' && (e.detail.includes('Allocating') || e.detail.includes('allocated'))).length;
   const bankerChecks = countOf('BANKER');
 
   /* Per-type event stats for sidebar */
@@ -622,7 +622,7 @@ const AdminDashboard: React.FC = () => {
             {/* Summary cards */}
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 12, marginBottom: 16 }}>
               {[
-                { label: 'Total Bookings Attempted',    value: Math.ceil(bookings / 2),     color: '#10B981', icon: '🎫',  detail: `${confirmed} confirmed` },
+                { label: 'Total Bookings Attempted',    value: attempted,     color: '#10B981', icon: '🎫',  detail: `${confirmed} confirmed` },
                 { label: 'Mutex Acquisitions',           value: mutexLocks,                  color: '#EF4444', icon: '🔒', detail: `on seat table` },
                 { label: 'TLB Hit Rate',                 value: `${tlbHitRate}%`,            color: '#F59E0B', icon: '⚡', detail: `${tlbHits}/${tlbTotal} lookups` },
                 { label: "Banker's Safety Checks",       value: bankerChecks,                color: '#F97316', icon: '✅', detail: `deadlock checks run` },

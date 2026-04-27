@@ -7,6 +7,7 @@ import com.vit.railway_os.repository.BookingRepository;
 import com.vit.railway_os.repository.TrainRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
+import jakarta.annotation.PostConstruct;
 
 import java.util.*;
 
@@ -64,6 +65,40 @@ public class BookingController {
 
     private static final List<Integer> diskRequestQueue = Collections.synchronizedList(new ArrayList<>());
     private static int currentDiskHead = 50;
+    
+    // ── OS CONCEPT: I/O Timeout Flusher ──
+    @PostConstruct
+    public void initIoFlusher() {
+        Thread flusher = new Thread(() -> {
+            while (true) {
+                try {
+                    Thread.sleep(10000); // Check every 10 seconds
+                    if (!diskRequestQueue.isEmpty() && diskRequestQueue.size() < 3) {
+                        List<Integer> batch;
+                        synchronized (diskRequestQueue) {
+                            if (diskRequestQueue.isEmpty()) continue;
+                            batch = new ArrayList<>(diskRequestQueue);
+                            diskRequestQueue.clear();
+                        }
+                        int[] reqArray = batch.stream().mapToInt(i -> i).toArray();
+                        DiskScheduler.SchedulingResult diskRes = diskScheduler.cscan(currentDiskHead, reqArray);
+                        
+                        eventLog.pushFileIO("⏱️ TIMEOUT: Flushing " + batch.size() + " pending disk requests via C-SCAN", 0, true);
+                        eventLog.pushFileIO("Head moved: " + currentDiskHead + " → " + diskRes.serviceOrder() + " (Total seek: " + diskRes.totalMovement() + " tracks)", 0, false);
+                        if (!diskRes.serviceOrder().isEmpty()) {
+                            currentDiskHead = diskRes.serviceOrder().get(diskRes.serviceOrder().size() - 1);
+                        }
+                    }
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    break;
+                }
+            }
+        });
+        flusher.setDaemon(true);
+        flusher.start();
+    }
+
     // GET /api/trains — Return live seat counts for all trains
     // Wrapped in Readers-Writers protocol so Admin Dashboard shows active readers
     // ─────────────────────────────────────────────────────────────

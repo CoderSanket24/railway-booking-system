@@ -173,24 +173,27 @@ public class BookingController {
 
         // Run synchronously so we can return the result
         try {
+            // ── STEP 8: Add to selected scheduler queue, then dispatch ──
+            // dispatch() calls queue.poll() internally, so queue depth returns
+            // to 0 after the booking completes (fixes the accumulating queue bug).
             switch (schedulerType.toUpperCase()) {
                 case "SJF":
                     sjfScheduler.addProcess(process);
+                    sjfScheduler.dispatch();     // polls + runs + joins
                     break;
                 case "RR":
                     roundRobinScheduler.addProcess(process);
+                    roundRobinScheduler.dispatch();
                     break;
                 case "PRIORITY":
                     priorityScheduler.addProcess(process);
+                    priorityScheduler.dispatch();
                     break;
                 default:
                     fcfsScheduler.addProcess(process);
+                    fcfsScheduler.dispatch();
                     break;
             }
-
-            // Run the process directly and wait
-            process.start();
-            process.join();
 
             CriticalSectionGuard.BookingResult result = process.getResult();
             Map<String, Object> response = new HashMap<>();
@@ -221,10 +224,10 @@ public class BookingController {
             }
             return response;
 
-        } catch (InterruptedException e) {
+        } catch (Exception e) {
             Thread.currentThread().interrupt();
-            eventLog.pushBooking("⚠️ Booking INTERRUPTED for P" + pid, pid, false);
-            return Map.of("success", false, "message", "Booking interrupted.");
+            eventLog.pushBooking("⚠️ Booking ERROR for P" + pid + ": " + e.getMessage(), pid, false);
+            return Map.of("success", false, "message", "Booking failed: " + e.getMessage());
         } finally {
             // ── ALWAYS release Dining Philosophers platform locks, even on failure/interruption ──
             if (trainIndex >= 0) {

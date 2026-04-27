@@ -14,6 +14,7 @@ public class SJFScheduler {
     private PriorityQueue<BookingProcess> sjfQueue = new PriorityQueue<>(
         Comparator.comparingInt(BookingProcess::getBurstTime)
     );
+    private int totalDispatched = 0;
 
     public synchronized void addProcess(BookingProcess process) {
         process.getPCB().setState(ProcessState.READY);
@@ -30,6 +31,7 @@ public class SJFScheduler {
                 System.out.println("[SJF DISPATCH] Running process " + process.getPCB().getProcessId() + 
                                   " (Shortest burst time: " + process.getBurstTime() + "ms)");
                 process.start();
+                totalDispatched++;
                 
                 try {
                     process.join(); // Wait for process to complete
@@ -40,7 +42,6 @@ public class SJFScheduler {
         }
     }
 
-    public int getQueueSize() {
-        return sjfQueue.size();
-    }
+    public int getQueueSize()       { return sjfQueue.size(); }
+    public int getTotalDispatched()  { return totalDispatched; }
 }

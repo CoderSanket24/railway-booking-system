@@ -12,6 +12,7 @@ import java.util.PriorityQueue;
 public class PriorityScheduler {
     
     private PriorityQueue<BookingProcess> priorityQueue = new PriorityQueue<>();
+    private int totalDispatched = 0;
 
     public synchronized void addProcess(BookingProcess process) {
         process.getPCB().setState(ProcessState.READY);
@@ -29,6 +30,7 @@ public class PriorityScheduler {
                                   process.getPCB().getProcessId() + " (Priority: " + 
                                   process.getPCB().getPriority() + ")");
                 process.start();
+                totalDispatched++;
                 
                 try {
                     process.join();
@@ -39,7 +41,6 @@ public class PriorityScheduler {
         }
     }
 
-    public int getQueueSize() {
-        return priorityQueue.size();
-    }
+    public int getQueueSize()       { return priorityQueue.size(); }
+    public int getTotalDispatched()  { return totalDispatched; }
 }

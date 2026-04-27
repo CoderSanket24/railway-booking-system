@@ -14,6 +14,7 @@ interface OsMetrics {
   activeReaders: number;
   totalReaderSessions?: number;
   peakConcurrentReaders?: number;
+  totalJobsDispatched?: number;
   mutexState?: { isLocked: boolean; lockedByPid: number | null };
   ticketsInBuffer?: number;
   recentProcesses?: { pid: number; type: string; newState: string }[];
@@ -154,7 +155,7 @@ const AdminDashboard: React.FC = () => {
 
   const fmtUp = `${String(Math.floor(uptime / 3600)).padStart(2,'0')}:${String(Math.floor((uptime % 3600)/60)).padStart(2,'0')}:${String(uptime % 60).padStart(2,'0')}`;
   const mx    = metrics.mutexState || { isLocked: false, lockedByPid: null };
-  const totalQ = (metrics.fcfsQueueSize ?? 0) + (metrics.sjfQueueSize ?? 0) + (metrics.roundRobinQueueSize ?? 0) + (metrics.priorityQueueSize ?? 0);
+  const totalJobsDispatched = metrics.totalJobsDispatched ?? 0;
 
   // Map scheduler key → correct metrics field
   const getQueueSize = (key: string) => {
@@ -246,7 +247,7 @@ const AdminDashboard: React.FC = () => {
         {/* Stat bar — always visible, all real data */}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6,1fr)', gap: 10, marginBottom: 20 }}>
           <StatPill label="Active Scheduler" value={scheduler}                          color="#6C63FF" icon="⚙️" />
-          <StatPill label="Queue Depth"       value={totalQ}                             color="#3B82F6" icon="📋" />
+          <StatPill label="Jobs Dispatched"   value={totalJobsDispatched}                        color="#3B82F6" icon="🚀" />
           <StatPill label="Active Readers"    value={metrics.activeReaders}                       color="#10B981" icon="👓" />
           <StatPill label="Mutex"             value={mx.isLocked ? `LOCKED P${mx.lockedByPid}` : 'OPEN'} color={mx.isLocked ? '#EF4444' : '#10B981'} icon={mx.isLocked ? '🔒' : '🔓'} />
           <StatPill label="Buffer Items"      value={metrics.ticketsInBuffer ?? 0}       color="#F59E0B" icon="📦" />

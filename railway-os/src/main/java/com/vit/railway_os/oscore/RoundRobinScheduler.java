@@ -14,6 +14,7 @@ public class RoundRobinScheduler {
     
     private static final int TIME_QUANTUM = 2000; // 2 seconds per process
     private Queue<BookingProcess> readyQueue = new LinkedList<>();
+    private int totalDispatched = 0;
 
     public synchronized void addProcess(BookingProcess process) {
         process.getPCB().setState(ProcessState.READY);
@@ -54,13 +55,13 @@ public class RoundRobinScheduler {
                                       " preempted. Back to ready queue.");
                     readyQueue.add(process);
                 } else {
+                    totalDispatched++;
                     System.out.println("[ROUND ROBIN] Process " + process.getPCB().getProcessId() + " completed.");
                 }
             }
         }
     }
 
-    public int getQueueSize() {
-        return readyQueue.size();
-    }
+    public int getQueueSize()       { return readyQueue.size(); }
+    public int getTotalDispatched()  { return totalDispatched; }
 }

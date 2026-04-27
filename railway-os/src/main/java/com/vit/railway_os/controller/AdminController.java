@@ -60,6 +60,12 @@ public class AdminController {
         metrics.put("mutexState",             tracker.getMutexState());
         metrics.put("ticketsInBuffer",        tracker.getTicketsInBuffer());
         metrics.put("philosophers",           trainPlatformLock.getPhilosopherStates());
+        // Total jobs ever dispatched across all 4 schedulers — cumulative, always grows
+        int totalDispatched = fcfsScheduler.getTotalDispatched()
+                + sjfScheduler.getTotalDispatched()
+                + roundRobinScheduler.getTotalDispatched()
+                + priorityScheduler.getTotalDispatched();
+        metrics.put("totalJobsDispatched", totalDispatched);
         return metrics;
     }
 

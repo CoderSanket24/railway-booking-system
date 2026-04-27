@@ -12,6 +12,7 @@ import java.util.Queue;
 public class FCFSScheduler {
     
     private Queue<BookingProcess> readyQueue = new LinkedList<>();
+    private int totalDispatched = 0;
 
     public synchronized void addProcess(BookingProcess process) {
         process.getPCB().setState(ProcessState.READY);
@@ -26,7 +27,7 @@ public class FCFSScheduler {
             if (process != null) {
                 System.out.println("[FCFS DISPATCH] Running process " + process.getPCB().getProcessId());
                 process.start();
-                
+                totalDispatched++;
                 try {
                     process.join(); // Wait for process to complete
                 } catch (InterruptedException e) {
@@ -36,7 +37,6 @@ public class FCFSScheduler {
         }
     }
 
-    public int getQueueSize() {
-        return readyQueue.size();
-    }
+    public int getQueueSize()       { return readyQueue.size(); }
+    public int getTotalDispatched()  { return totalDispatched; }
 }

@@ -53,7 +53,17 @@ public class BookingController {
     @Autowired
     private SmartSchedulerSelector smartScheduler;
 
-    // ─────────────────────────────────────────────────────────────
+    @Autowired
+    private BuddySystem buddySystem;
+
+    @Autowired
+    private TLBSimulator tlbSimulator;
+
+    @Autowired
+    private DiskScheduler diskScheduler;
+
+    private static final List<Integer> diskRequestQueue = Collections.synchronizedList(new ArrayList<>());
+    private static int currentDiskHead = 50;
     // GET /api/trains — Return live seat counts for all trains
     // Wrapped in Readers-Writers protocol so Admin Dashboard shows active readers
     // ─────────────────────────────────────────────────────────────
@@ -71,7 +81,12 @@ public class BookingController {
             // Real DB reads involve disk seek + transfer latency. This 300ms hold makes
             // concurrent readers visible to the Admin monitor (which polls every 400ms).
             Thread.sleep(300);
-            eventLog.pushTLB("TLB lookup: seat table page for P" + readerId + " → frame cached", readerId, true);
+            
+            // ACTUAL TLB LOOKUP FOR MEMORY READ
+            int logicalAddr = 0x0020; // Assume Page 0 holds the main trains list
+            TLBSimulator.TranslationResult tlbResult = tlbSimulator.translate(logicalAddr);
+            String hitMiss = tlbResult.tlbHit() ? "HIT" : "MISS";
+            eventLog.pushTLB("TLB " + hitMiss + ": seat table page for P" + readerId + " → physical frame 0x" + Integer.toHexString(tlbResult.physicalAddress()), readerId, tlbResult.tlbHit());
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
         } finally {
@@ -141,8 +156,15 @@ public class BookingController {
                 + " (burst=" + seatsNeeded * 10 + "ms)", pid);
         }
 
-        // ── STEP 4: Memory allocated for session ──
-        eventLog.pushMemory("Allocating session memory for P" + pid + " (booking context ~64KB)", pid);
+        // ── STEP 4: Memory allocated for session (Real Buddy System) ──
+        int memoryRequired = 64; // KB for session context
+        int address = buddySystem.allocate(pid, memoryRequired, passengerName);
+        
+        if (address == -1) {
+            eventLog.pushMemory("❌ OUT OF MEMORY: Buddy System denied P" + pid + " (" + memoryRequired + "KB)", pid);
+            return Map.of("success", false, "message", "Server out of memory (Buddy System full). Please wait for other users to finish.");
+        }
+        eventLog.pushMemory("Buddy System allocated " + memoryRequired + "KB for P" + pid + " at physical address 0x" + Integer.toHexString(address), pid);
 
         // ── STEP 5: Banker's Algorithm safety check (Now happens securely inside CriticalSectionGuard) ──
 
@@ -199,9 +221,36 @@ public class BookingController {
             if (result != null && result.success && result.booking != null) {
                 eventLog.pushMutex("P" + pid + " releasing mutex lock — seat table updated", pid, false);
                 eventLog.pushFileIO("Writing booking record " + result.booking.getPnr() + " to disk (INDEXED file org)", pid, true);
-                eventLog.pushTLB("TLB hit: booking page for P" + pid + " → physical frame 0x" + Integer.toHexString(pid % 256), pid, true);
-                eventLog.pushMemory("Deallocating session memory for P" + pid + " (booking committed)", pid);
+                
+                // ACTUAL TLB LOOKUP FOR MEMORY WRITE
+                int pageNum = (pid % 15) + 1; // Different users access different booking pages
+                int logicalAddr = (pageNum << 8) | 0x40;
+                TLBSimulator.TranslationResult tlbResult = tlbSimulator.translate(logicalAddr);
+                String hitMiss = tlbResult.tlbHit() ? "HIT" : "MISS";
+                
+                eventLog.pushTLB("TLB " + hitMiss + ": booking page for P" + pid + " → physical frame 0x" + Integer.toHexString(tlbResult.physicalAddress()), pid, tlbResult.tlbHit());
                 eventLog.pushBooking("✅ Booking CONFIRMED: " + result.booking.getPnr() + " | " + passengerName + " | " + trainNumber, pid, true);
+
+                // ── STEP 8b: Disk Scheduling (Unit VI) ──
+                int trackReq = (int)(Math.random() * 200); // Disk has 200 tracks (0-199)
+                diskRequestQueue.add(trackReq);
+                eventLog.pushFileIO("Added disk track " + trackReq + " to IO queue (Size: " + diskRequestQueue.size() + "/3)", pid, false);
+                
+                if (diskRequestQueue.size() >= 3) {
+                    List<Integer> batch;
+                    synchronized (diskRequestQueue) {
+                        batch = new ArrayList<>(diskRequestQueue);
+                        diskRequestQueue.clear();
+                    }
+                    int[] reqArray = batch.stream().mapToInt(i -> i).toArray();
+                    DiskScheduler.SchedulingResult diskRes = diskScheduler.cscan(currentDiskHead, reqArray);
+                    
+                    eventLog.pushFileIO("🚀 FLUSHING DISK QUEUE using C-SCAN algorithm!", 0, true);
+                    eventLog.pushFileIO("Head moved: " + currentDiskHead + " → " + diskRes.serviceOrder() + " (Total seek: " + diskRes.totalMovement() + " tracks)", 0, false);
+                    if (!diskRes.serviceOrder().isEmpty()) {
+                        currentDiskHead = diskRes.serviceOrder().get(diskRes.serviceOrder().size() - 1);
+                    }
+                }
 
                 response.put("success", true);
                 response.put("pnr", result.booking.getPnr());
@@ -236,6 +285,9 @@ public class BookingController {
                     // Lock was already released or was never fully acquired
                 }
             }
+            // ── STEP 9: Free Buddy System Memory ──
+            buddySystem.deallocate(address);
+            eventLog.pushMemory("Deallocated session memory for P" + pid + " @ 0x" + Integer.toHexString(address) + " (Buddy merged)", pid);
         }
     }
 

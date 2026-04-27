@@ -23,6 +23,12 @@ public class CriticalSectionGuard {
     @Autowired
     private OsStateTracker tracker;
 
+    @Autowired
+    private BankersAlgorithm bankersAlgorithm;
+
+    @Autowired
+    private OsEventLog eventLog;
+
     private final ReentrantLock mutex = new ReentrantLock();
 
     /**
@@ -47,13 +53,30 @@ public class CriticalSectionGuard {
 
             Train train = trainOpt.get();
 
-            // 2. CHECK if enough seats available
-            if (train.getAvailableSeats() >= seatsNeeded) {
+            // 2. CHECK if enough seats available (Wait! We use actual Banker's Algorithm now!)
+            int trainIndex = BankersAlgorithm.getTrainIndex(trainNumber);
+            if (trainIndex == -1) {
+                return new BookingResult(false, null, "Invalid train for Banker's Check.");
+            }
+
+            int[] request = new int[BankersAlgorithm.NUM_RESOURCES];
+            request[trainIndex] = seatsNeeded;
+
+            // ACTUAL BANKER'S ALGORITHM CHECK IN THE LIVE PIPELINE
+            eventLog.pushBanker("Banker’s check: P" + userId + " requesting " + seatsNeeded + " " + trainNumber + " seats — running safety algo", userId, true);
+            BankersAlgorithm.RequestResult bankerRes = bankersAlgorithm.requestResources(userId, request);
+
+            if (bankerRes.granted()) {
+                String safeSeqStr = bankerRes.steps().stream()
+                        .filter(s -> s.contains("Safe sequence:"))
+                        .findFirst()
+                        .orElse("✅ Safe sequence generated.");
+                eventLog.pushBanker(safeSeqStr, userId, true);
 
                 // Simulate processing time — proves the lock blocks concurrent requests
                 Thread.sleep(2000);
 
-                // 3. DEDUCT seats
+                // 3. DEDUCT seats (Banker's already deducted from its internal tracker, now update DB)
                 train.setAvailableSeats(train.getAvailableSeats() - seatsNeeded);
 
                 // 4. SAVE to MySQL
@@ -69,10 +92,11 @@ public class CriticalSectionGuard {
 
                 System.out.println("SUCCESS: User " + userId + " booked " + seatsNeeded +
                         " seats on " + trainNumber + ". DB Remaining: " + train.getAvailableSeats());
-                return new BookingResult(true, booking, "Booking confirmed!");
+                return new BookingResult(true, booking, "Booking confirmed! (Banker's Safe)");
             } else {
-                System.out.println("FAILED: User " + userId + " - Not enough seats in DB.");
-                return new BookingResult(false, null, "Not enough seats available.");
+                eventLog.pushBanker("❌ Banker’s Algorithm DENIED request: " + bankerRes.status(), userId, false);
+                System.out.println("FAILED: User " + userId + " - Banker's Check Denied: " + bankerRes.status());
+                return new BookingResult(false, null, "Banker's Denied: " + bankerRes.status());
             }
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();

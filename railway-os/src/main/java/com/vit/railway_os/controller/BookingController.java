@@ -144,8 +144,7 @@ public class BookingController {
         // ── STEP 4: Memory allocated for session ──
         eventLog.pushMemory("Allocating session memory for P" + pid + " (booking context ~64KB)", pid);
 
-        // ── STEP 5: Banker's Algorithm safety check ──
-        eventLog.pushBanker("Banker’s check: P" + pid + " requesting " + seatsNeeded + " " + trainNumber + " seats — running safety algo", pid, true);
+        // ── STEP 5: Banker's Algorithm safety check (Now happens securely inside CriticalSectionGuard) ──
 
         // ── STEP 6: Mutex lock acquired (critical section) ──
         eventLog.pushMutex("P" + pid + " acquiring mutex lock on seat table (critical section)", pid, true);
